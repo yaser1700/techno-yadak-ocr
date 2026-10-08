@@ -24,7 +24,7 @@
 
 <div class="card">
   <h2>۲) عکس فاکتور</h2>
-  <input id="invoice" type="file" accept="image/*" capture="environment">
+  <div class="row"><input id="invoice" type="file" accept="image/*,.pdf,application/pdf"><input id="camera" type="file" accept="image/*" capture="environment" style="display:none"><button id="cameraBtn" type="button" class="secondary">📷 عکس با دوربین</button></div><div class="small" style="margin-top:8px">می‌توانی عکس، PDF یا فایل فاکتور را انتخاب کنی. دکمه دوربین فقط دوربین را باز می‌کند.</div>
   <img id="preview" class="preview hidden" alt="پیش‌نمایش فاکتور">
   <button id="go" class="primary">📷 خواندن و استخراج اقلام فاکتور</button>
   <div id="st" class="status hidden"></div>
@@ -43,10 +43,25 @@
   </div>
   <div class="tableWrap" id="items"></div>
   <div class="actions">
-    <button id="saveOrder" class="secondary">💾 ذخیره فاکتور</button>
+    <button id="saveOrder" class="secondary">💾 ذخیره فاکتور</button><button id="assignOrder" class="primary" style="margin-top:0">📤 ارسال برای جمع‌آور</button>
     <button id="copyOrder" class="secondary">📋 کپی لیست</button>
     <button id="printOrder" class="secondary">🖨️ چاپ</button>
   </div>
+</div>
+
+<div class="card" id="workerCard">
+  <h2>👷 ماموریت جمع‌آوری کارگر</h2>
+  <div class="muted">کارگر می‌تواند کد مأموریت را وارد کند و بدون چاپ فاکتور، اقلام را روی گوشی تیک بزند.</div>
+  <div class="row" style="margin-top:10px"><input id="orderCode" class="picker" placeholder="کد مأموریت، مثلاً A7K2P9"><button id="loadOrder" class="secondary">📥 دریافت مأموریت</button></div>
+  <div id="workerStatus" class="status hidden"></div>
+  <div id="workerItems"></div>
+  <button id="submitWorker" class="primary hidden">✅ ثبت جمع‌آوری و ارسال برای کنترل</button>
+</div>
+
+<div class="card">
+  <h2>🔎 کنترل نهایی</h2>
+  <div class="muted">در مرحله کنترل، مقدار فاکتور با مقدار واقعی جمع‌آوری‌شده مقایسه می‌شود. کسری، اضافی و کالای اشتباه باید جداگانه مشخص شوند.</div>
+  <div id="finalCheck" class="status wait">پس از ثبت جمع‌آوری، نتیجه کنترل اینجا نمایش داده می‌شود.</div>
 </div>
 
 <div class="card">
@@ -62,7 +77,17 @@
 </div>
 </div>
 
-<script src="/products.js"></script>
+<script src="/products.js">
+async function apiJson(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(opts.headers||{})},...opts});const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||`خطای سرور ${r.status}`);return d;}
+function renderWorkerOrder(o){
+  const h=o.items.map(x=>`<div class="card" style="margin:8px 0;padding:12px"><div style="font-weight:bold">کد ${escapeHtml(x.code)}</div><div>${escapeHtml(x.name)}</div><div class="row" style="margin-top:8px"><label style="flex:1">تعداد فاکتور: <b>${toFa(x.expectedQty)}</b></label><input class="qty workerQty" data-i="${x.index}" type="number" min="0" value="${x.actualQty||x.expectedQty}"><label style="min-width:100px"><input class="workerCheck" data-i="${x.index}" type="checkbox" ${x.checked?'checked':''}> جمع شد</label></div></div>`).join('');
+  $('workerItems').innerHTML=h;$('submitWorker').classList.remove('hidden');
+}
+let workerOrder=null;
+$('loadOrder').onclick=async()=>{try{const id=$('orderCode').value.trim().toUpperCase();if(!id)throw new Error('کد مأموریت را وارد کن.');const d=await apiJson('/api/orders/'+encodeURIComponent(id));workerOrder=d.order;renderWorkerOrder(workerOrder);$('workerStatus').className='status ok';$('workerStatus').textContent=`ماموریت ${workerOrder.id} — ${workerOrder.picker}`;$('workerStatus').classList.remove('hidden');}catch(e){$('workerStatus').className='status err';$('workerStatus').textContent=e.message;$('workerStatus').classList.remove('hidden')}};
+$('submitWorker').onclick=async()=>{if(!workerOrder)return;const items=workerOrder.items.map(x=>{const q=document.querySelector(`.workerQty[data-i="${x.index}"]`);const c=document.querySelector(`.workerCheck[data-i="${x.index}"]`);return {...x,actualQty:Number(q?.value)||0,checked:Boolean(c?.checked)}});try{const d=await apiJson('/api/orders/'+workerOrder.id,{method:'PATCH',body:JSON.stringify({items,status:'collected'})});workerOrder=d.order;const issues=workerOrder.items.filter(x=>x.actualQty!==x.expectedQty);$('finalCheck').className='status '+(issues.length?'err':'ok');$('finalCheck').textContent=issues.length?`⚠️ ${toFa(issues.length)} ردیف نیازمند بررسی است: ${issues.map(x=>`کد ${x.code} (${x.issue})`).join('، ')}`:'✅ همه اقلام طبق فاکتور جمع‌آوری شده‌اند.';}catch(e){alert(e.message)}};
+$('assignOrder').onclick=async()=>{try{if(!currentItems.length)throw new Error('ابتدا فاکتور را بخوان.');const picker=$('picker').value.trim();if(!picker)throw new Error('نام جمع‌آور را وارد کن.');const d=await apiJson('/api/orders',{method:'POST',body:JSON.stringify({picker,items:currentItems,invoiceName:lastFile?.name||''})});alert(`ماموریت ساخته شد.\nکد مأموریت: ${d.order.id}\nاین کد را برای ${picker} بفرست.`);}catch(e){alert(e.message)}};
+</script>
 <script>
 const products=Array.isArray(window.PRODUCT_BANK)?window.PRODUCT_BANK:[];
 const byCode=new Map(products.map(p=>[String(p.code),p]));
@@ -70,6 +95,10 @@ const $=id=>document.getElementById(id);
 let lastFile=null,lastText="",currentItems=[],busy=false;
 $("picker").value=localStorage.getItem("techno_picker_name")||"";
 $("picker").addEventListener("change",()=>localStorage.setItem("techno_picker_name",$("picker").value.trim()));
+$("cameraBtn").onclick=()=>$("camera").click();
+$("camera").addEventListener("change",()=>{if($("camera").files[0]){$("invoice").value="";lastFile=$("camera").files[0];renderSelectedFile(lastFile)}});
+$("invoice").addEventListener("change",()=>{lastFile=$("invoice").files[0]||null;renderSelectedFile(lastFile)});
+function renderSelectedFile(f){if(!f){$("preview").classList.add("hidden");return;} $("info").textContent=`${f.name} — ${(f.size/1024/1024).toFixed(2)} MB`; if(f.type.startsWith("image/")){const u=URL.createObjectURL(f);$("preview").src=u;$("preview").classList.remove("hidden");}else{$("preview").classList.add("hidden");}}
 
 function norm(s){return String(s||"").replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[٬،]/g,",").replace(/[٫]/g,".").replace(/[‐‑–—]/g,"-").replace(/\u200c/g," ").replace(/\s+/g," ").trim()}
 function digits(s){return norm(s).replace(/,/g,"")}
@@ -220,13 +249,23 @@ async function runOCR(file){
 }
 
 $("invoice").addEventListener('change',()=>{const f=$("invoice").files[0];if(!f)return;lastFile=f;const u=URL.createObjectURL(f);$("preview").src=u;$("preview").classList.remove('hidden');});
-$("go").onclick=async()=>{if(busy)return;const f=$("invoice").files[0];if(!f)return setStatus('ابتدا عکس فاکتور را انتخاب کن.','err');busy=true;$("go").disabled=true;$("bar").style.width='5%';try{await runOCR(f)}catch(e){setStatus('OCR انجام نشد: '+e.message,'err');$("retry").classList.remove('hidden')}finally{busy=false;$("go").disabled=false}};
+$("go").onclick=async()=>{if(busy)return;const f=lastFile||$("invoice").files[0]||$("camera").files[0];if(!f)return setStatus('ابتدا عکس یا PDF فاکتور را انتخاب کن.','err');busy=true;$("go").disabled=true;$("bar").style.width='5%';try{await runOCR(f)}catch(e){setStatus('OCR انجام نشد: '+e.message,'err');$("retry").classList.remove('hidden')}finally{busy=false;$("go").disabled=false}};
 $("again").onclick=async()=>{if(!lastFile||busy)return;busy=true;try{await runOCR(lastFile)}catch(e){setStatus('OCR انجام نشد: '+e.message,'err')}finally{busy=false}};
 
 function buildText(){let picker=$("picker").value.trim()||'ثبت نشده';let s=`کنترل جمع‌آوری سفارش - تکنو یدک پارت عباسی\nجمع‌آور: ${picker}\n\n`;currentItems.forEach((x,i)=>s+=`${i+1}. کد ${x.code} - ${x.name} - تعداد: ${x.qty}\n`);return s}
 $("copyOrder").onclick=async()=>{try{await navigator.clipboard.writeText(buildText());alert('لیست کپی شد.')}catch(e){alert('کپی خودکار در این مرورگر در دسترس نیست.')}};
 $("saveOrder").onclick=()=>{const data={createdAt:new Date().toISOString(),picker:$("picker").value.trim(),items:currentItems,ocrText:lastText};localStorage.setItem('techno_last_order',JSON.stringify(data));alert('فاکتور روی همین دستگاه ذخیره شد.')};
 $("printOrder").onclick=()=>window.print();
+
+async function apiJson(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(opts.headers||{})},...opts});const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||`خطای سرور ${r.status}`);return d;}
+function renderWorkerOrder(o){
+  const h=o.items.map(x=>`<div class="card" style="margin:8px 0;padding:12px"><div style="font-weight:bold">کد ${escapeHtml(x.code)}</div><div>${escapeHtml(x.name)}</div><div class="row" style="margin-top:8px"><label style="flex:1">تعداد فاکتور: <b>${toFa(x.expectedQty)}</b></label><input class="qty workerQty" data-i="${x.index}" type="number" min="0" value="${x.actualQty||x.expectedQty}"><label style="min-width:100px"><input class="workerCheck" data-i="${x.index}" type="checkbox" ${x.checked?'checked':''}> جمع شد</label></div></div>`).join('');
+  $('workerItems').innerHTML=h;$('submitWorker').classList.remove('hidden');
+}
+let workerOrder=null;
+$('loadOrder').onclick=async()=>{try{const id=$('orderCode').value.trim().toUpperCase();if(!id)throw new Error('کد مأموریت را وارد کن.');const d=await apiJson('/api/orders/'+encodeURIComponent(id));workerOrder=d.order;renderWorkerOrder(workerOrder);$('workerStatus').className='status ok';$('workerStatus').textContent=`ماموریت ${workerOrder.id} — ${workerOrder.picker}`;$('workerStatus').classList.remove('hidden');}catch(e){$('workerStatus').className='status err';$('workerStatus').textContent=e.message;$('workerStatus').classList.remove('hidden')}};
+$('submitWorker').onclick=async()=>{if(!workerOrder)return;const items=workerOrder.items.map(x=>{const q=document.querySelector(`.workerQty[data-i="${x.index}"]`);const c=document.querySelector(`.workerCheck[data-i="${x.index}"]`);return {...x,actualQty:Number(q?.value)||0,checked:Boolean(c?.checked)}});try{const d=await apiJson('/api/orders/'+workerOrder.id,{method:'PATCH',body:JSON.stringify({items,status:'collected'})});workerOrder=d.order;const issues=workerOrder.items.filter(x=>x.actualQty!==x.expectedQty);$('finalCheck').className='status '+(issues.length?'err':'ok');$('finalCheck').textContent=issues.length?`⚠️ ${toFa(issues.length)} ردیف نیازمند بررسی است: ${issues.map(x=>`کد ${x.code} (${x.issue})`).join('، ')}`:'✅ همه اقلام طبق فاکتور جمع‌آوری شده‌اند.';}catch(e){alert(e.message)}};
+$('assignOrder').onclick=async()=>{try{if(!currentItems.length)throw new Error('ابتدا فاکتور را بخوان.');const picker=$('picker').value.trim();if(!picker)throw new Error('نام جمع‌آور را وارد کن.');const d=await apiJson('/api/orders',{method:'POST',body:JSON.stringify({picker,items:currentItems,invoiceName:lastFile?.name||''})});alert(`ماموریت ساخته شد.\nکد مأموریت: ${d.order.id}\nاین کد را برای ${picker} بفرست.`);}catch(e){alert(e.message)}};
 </script>
 </body>
 </html>

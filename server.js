@@ -13,9 +13,36 @@ const upload = multer({
 const PORT = Number(process.env.PORT) || 10000;
 const OCR_API_KEY = process.env.OCR_API_KEY || "";
 const OCR_URL = "https://api.ocr.space/parse/image";
+const ORDERS = new Map();
+function makeOrderId(){ return Math.random().toString(36).slice(2,8).toUpperCase(); }
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+
+app.post("/api/orders", (req,res)=>{
+  try {
+    const {picker, items, invoiceName} = req.body || {};
+    if(!picker || !Array.isArray(items) || !items.length) return res.status(400).json({ok:false,error:"نام جمع‌آور و اقلام فاکتور الزامی است."});
+    const id=makeOrderId();
+    const order={id,picker,invoiceName:invoiceName||"",items:items.map((x,i)=>({index:i,code:String(x.code||""),name:String(x.name||""),expectedQty:Number(x.qty)||0,actualQty:0,checked:false,issue:""})),status:"assigned",createdAt:new Date().toISOString()};
+    ORDERS.set(id,order);
+    res.json({ok:true,order});
+  } catch(e){res.status(500).json({ok:false,error:e.message});}
+});
+app.get("/api/orders/:id",(req,res)=>{
+  const o=ORDERS.get(String(req.params.id||"").toUpperCase());
+  if(!o) return res.status(404).json({ok:false,error:"ماموریت پیدا نشد یا سرور از نو راه‌اندازی شده است."});
+  res.json({ok:true,order:o});
+});
+app.patch("/api/orders/:id",(req,res)=>{
+  const o=ORDERS.get(String(req.params.id||"").toUpperCase());
+  if(!o) return res.status(404).json({ok:false,error:"ماموریت پیدا نشد."});
+  const incoming=Array.isArray(req.body?.items)?req.body.items:[];
+  incoming.forEach(x=>{ const i=Number(x.index); if(o.items[i]){o.items[i].actualQty=Math.max(0,Number(x.actualQty)||0);o.items[i].checked=Boolean(x.checked);o.items[i].issue=o.items[i].actualQty===o.items[i].expectedQty?"":(o.items[i].actualQty<o.items[i].expectedQty?"کسری":"اضافی");}});
+  o.status=req.body?.status||o.status; o.updatedAt=new Date().toISOString();
+  res.json({ok:true,order:o});
+});
 
 app.get("/health", (req, res) => {
   res.status(200).json({ ok: true, service: "techno-yadak-ocr", port: PORT, ocrKeyConfigured: Boolean(OCR_API_KEY) });
@@ -39,7 +66,7 @@ app.post("/api/ocr", upload.single("file"), async (req, res) => {
     console.log("[OCR] request received", { hasKey: Boolean(OCR_API_KEY), fileName: req.file?.originalname, mime: req.file?.mimetype, bytes: req.file?.size });
     if (!OCR_API_KEY) return res.status(500).json({ ok:false, error:"سرور OCR_API_KEY ندارد.", debugCode:"MISSING_API_KEY" });
     if (!req.file?.buffer?.length) return res.status(400).json({ ok:false, error:"فایل تصویر دریافت نشد.", debugCode:"NO_FILE" });
-    if (req.file.size > 1024 * 1024) return res.status(413).json({ ok:false, error:"حجم عکس بیشتر از ۱ مگابایت است.", debugCode:"FILE_OVER_1MB", bytes:req.file.size });
+    if (req.file.size > 10 * 1024 * 1024) return res.status(413).json({ ok:false, error:"حجم فایل بیشتر از ۱۰ مگابایت است.", debugCode:"FILE_OVER_10MB", bytes:req.file.size });
 
     const form = new FormData();
     form.append("language", "per");
