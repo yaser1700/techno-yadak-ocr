@@ -18,8 +18,9 @@
 
 <div class="card">
   <h2>۱) مشخصات جمع‌آوری</h2>
-  <input id="picker" class="picker" placeholder="نام جمع‌آور / انباردار">
-  <div class="small" style="margin-top:8px">نام در همین دستگاه نگهداری می‌شود تا برای فاکتور بعدی دوباره وارد نشود.</div>
+  <select id="picker" class="picker"><option value="">انتخاب جمع‌آور / انباردار</option></select>
+  <button id="addPicker" type="button" class="secondary" style="margin-top:8px">➕ افزودن نام کارگر</button>
+  <div class="small" style="margin-top:8px">فعلاً نام‌ها فقط روی همین دستگاه ذخیره می‌شوند. در نسخه چندنفره نهایی، مدیر از پنل خودش کارگران را ثبت می‌کند.</div>
 </div>
 
 <div class="card">
@@ -185,12 +186,42 @@ function extractItems(text){
 
 
 function extractTable(overlay){
- const ws=(overlay||[]).flatMap(l=>(l.words||[]).map(w=>({t:norm(w.text||''),x:+w.left||0,y:(+w.top||0)+(+w.height||0)/2,h:+w.height||14}))).filter(w=>w.t);
- const maxX=Math.max(1,...ws.map(w=>w.x)); const codes=[];
- for(const w of ws){const p=byCode.get(digits(w.t)); if(p&&w.x/maxX>.72) codes.push({p,w})}
- codes.sort((a,b)=>a.w.y-b.w.y); const rows=[];
- for(const c of codes) if(!rows.some(r=>Math.abs(r.w.y-c.w.y)<Math.max(10,c.w.h))) rows.push(c);
- return rows.map(r=>{const nums=ws.filter(w=>Math.abs(w.y-r.w.y)<Math.max(22,r.w.h*2)&&w.x/maxX>.48&&w.x/maxX<.70).map(w=>({w,n:Number(digits(w.t).replace(/[^0-9]/g,''))})).filter(z=>z.n>0&&z.n<1000);nums.sort((a,b)=>Math.abs(a.w.y-r.w.y)-Math.abs(b.w.y-r.w.y));return {code:String(r.p.code),name:r.p.name,qty:nums[0]?.n||null,confidence:nums.length?'high':'low',source:nums.length?'ستون مقدار فاکتور':'نیازمند بررسی'};});
+ // تشخیص ردیف بر اساس ستون «کد کالا» و سپس پیدا کردن نزدیک‌ترین عددِ
+ // سمت چپ کد در همان ردیف. این کار جلوی انتخاب اعداد داخل شرح کالا
+ // مثل 131، 206 و 207 را می‌گیرد.
+ const ws=(overlay||[]).flatMap(l=>(l.words||[]).map(w=>({
+   t:norm(w.text||''), x:+w.left||0, y:(+w.top||0)+(+w.height||0)/2, h:+w.height||14,
+   width:+w.width||0
+ }))).filter(w=>w.t);
+ const maxX=Math.max(1,...ws.map(w=>w.x));
+ const codes=[];
+ for(const w of ws){
+   const p=byCode.get(digits(w.t));
+   // کد باید در ناحیه سمت راست جدول باشد؛ نه صرفاً هرجای صفحه.
+   if(p && w.x/maxX>.68) codes.push({p,w});
+ }
+ codes.sort((a,b)=>a.w.y-b.w.y);
+ const rows=[];
+ for(const c of codes){
+   const same=rows.find(r=>Math.abs(r.w.y-c.w.y)<Math.max(14,c.w.h*1.6));
+   if(!same) rows.push(c);
+ }
+ return rows.map(r=>{
+   const tol=Math.max(24,r.w.h*2.2);
+   const candidates=ws.filter(w=>{
+     if(w===r.w || Math.abs(w.y-r.w.y)>tol) return false;
+     if(w.x>=r.w.x) return false;
+     const raw=digits(w.t).replace(/[^0-9]/g,'');
+     if(!/^\d{1,3}$/.test(raw)) return false;
+     const n=Number(raw);
+     // مقدار معمولاً نزدیکِ سمت چپ کد قرار دارد؛ اعداد شرح کالا دورترند.
+     const dist=r.w.x-w.x;
+     return n>=1 && n<=999 && dist<=Math.max(170,maxX*.28);
+   }).map(w=>({w,n:Number(digits(w.t).replace(/[^0-9]/g,'')),dist:r.w.x-w.x}));
+   candidates.sort((a,b)=>a.dist-b.dist);
+   const q=candidates[0];
+   return {code:String(r.p.code),name:r.p.name,qty:q?.n||null,confidence:q?'high':'low',source:q?'ستون مقدار فاکتور':'نیازمند بررسی'};
+ });
 }
 
 function renderItems(items){
@@ -251,6 +282,21 @@ async function runOCR(file){
 $("invoice").addEventListener('change',()=>{const f=$("invoice").files[0];if(!f)return;lastFile=f;const u=URL.createObjectURL(f);$("preview").src=u;$("preview").classList.remove('hidden');});
 $("go").onclick=async()=>{if(busy)return;const f=lastFile||$("invoice").files[0]||$("camera").files[0];if(!f)return setStatus('ابتدا عکس یا PDF فاکتور را انتخاب کن.','err');busy=true;$("go").disabled=true;$("bar").style.width='5%';try{await runOCR(f)}catch(e){setStatus('OCR انجام نشد: '+e.message,'err');$("retry").classList.remove('hidden')}finally{busy=false;$("go").disabled=false}};
 $("again").onclick=async()=>{if(!lastFile||busy)return;busy=true;try{await runOCR(lastFile)}catch(e){setStatus('OCR انجام نشد: '+e.message,'err')}finally{busy=false}};
+
+function loadPickers(){
+ const names=JSON.parse(localStorage.getItem('techno_pickers')||'[]');
+ const sel=$('picker'); const current=sel.value;
+ sel.innerHTML='<option value="">انتخاب جمع‌آور / انباردار</option>'+names.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+ if(names.includes(current)) sel.value=current;
+}
+$('addPicker').onclick=()=>{
+ const name=prompt('نام کارگر / جمع‌آور را وارد کنید:');
+ if(!name||!name.trim()) return;
+ const names=JSON.parse(localStorage.getItem('techno_pickers')||'[]');
+ const n=name.trim(); if(!names.includes(n)) names.push(n);
+ localStorage.setItem('techno_pickers',JSON.stringify(names)); loadPickers(); $('picker').value=n;
+};
+loadPickers();
 
 function buildText(){let picker=$("picker").value.trim()||'ثبت نشده';let s=`کنترل جمع‌آوری سفارش - تکنو یدک پارت عباسی\nجمع‌آور: ${picker}\n\n`;currentItems.forEach((x,i)=>s+=`${i+1}. کد ${x.code} - ${x.name} - تعداد: ${x.qty}\n`);return s}
 $("copyOrder").onclick=async()=>{try{await navigator.clipboard.writeText(buildText());alert('لیست کپی شد.')}catch(e){alert('کپی خودکار در این مرورگر در دسترس نیست.')}};
