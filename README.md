@@ -1,26 +1,13 @@
-# سرور OCR تکنو یدک
+# Techno Yadak OCR - Render Fixed
 
-این نسخه مشکل ارتباط مستقیم `content://` و CORS را با قرار دادن OCR در سمت سرور حل می‌کند.
+نسخه اصلاح‌شده برای Render.
+API Key در GitHub قرار نمی‌گیرد و باید در Render با نام `OCR_API_KEY` تنظیم شود.
 
-## اجرا
-1. Node.js نصب باشد.
-2. در پوشه پروژه:
-   npm install
-3. کلید OCR.space را در متغیر محیطی قرار بده:
-   - Windows PowerShell: `$env:OCR_API_KEY="کلید"`
-   - Linux/macOS: `export OCR_API_KEY="کلید"`
-4. اجرا:
-   npm start
-5. مرورگر:
-   http://localhost:3000
+تنظیمات:
+- Runtime: Node
+- Build Command: `npm install`
+- Start Command: `npm start`
+- Plan: Free
+- Health Check: `/health`
 
-## استقرار روی Render / Railway
-- پروژه را به GitHub بفرست.
-- Build/Install: `npm install`
-- Start: `npm start`
-- Environment Variable:
-  `OCR_API_KEY = کلید OCR.space`
-
-بعد از استقرار، برنامه موبایل باید از آدرس HTTPS سرور استفاده کند؛ دیگر API Key داخل فایل HTML نیست.
-
-طبق مستندات OCR.space، POST endpoint رسمی `https://api.ocr.space/parse/image` است و API key باید در header ارسال شود.
+سرور روی `0.0.0.0` و پورت `process.env.PORT` اجرا می‌شود؛ مقدار پیش‌فرض 10000 است.
