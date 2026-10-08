@@ -67,7 +67,7 @@
 const products=Array.isArray(window.PRODUCT_BANK)?window.PRODUCT_BANK:[];
 const byCode=new Map(products.map(p=>[String(p.code),p]));
 const $=id=>document.getElementById(id);
-let lastFile=null,lastText="",lastOverlay=[],currentItems=[],busy=false;
+let lastFile=null,lastText="",currentItems=[],busy=false;
 $("picker").value=localStorage.getItem("techno_picker_name")||"";
 $("picker").addEventListener("change",()=>localStorage.setItem("techno_picker_name",$("picker").value.trim()));
 
@@ -78,88 +78,14 @@ function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 function isBadContext(s){return /(موبایل|همراه|تلفن|تماس|آدرس|نشانی|کد\s*پست|پستی|تاریخ|حساب|شبا|بانک|مبلغ|جمع|مالیات|ارزش افزوده|شماره اقتصادی|شماره کارت|وب سایت|www|http)/i.test(norm(s))}
 function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
-function exactCodeFromWord(word){
- const d=digits(word);
- if(!/^\d{1,8}$/.test(d)) return null;
- return byCode.has(d)?d:null;
-}
-function numericWord(w){
- const d=digits(w);
- if(!/^\d{1,8}$/.test(d)) return null;
- return Number(d);
-}
-
-// فاکتورهای تکنو یدک: کد کالا در ستون سمت راست جدول است.
-// به‌جای جستجوی هر عدد در کل متن، ابتدا ستون کد را از روی مختصات OCR پیدا می‌کنیم.
-function findCodeOccurrences(overlayLines=[]){
- const occ=[];
- for(const line of overlayLines||[]){
-   for(const w of (line.words||[])){
-     const code=exactCodeFromWord(w.text);
-     if(code) occ.push({code,top:Number(w.top)||0,left:Number(w.left)||0,width:Number(w.width)||0,height:Number(w.height)||0,text:w.text});
-   }
- }
- return occ;
-}
-function clusterX(occ){
- const a=[...occ].sort((x,y)=>x.left-y.left);
- const clusters=[];
- for(const o of a){
-   let c=clusters[clusters.length-1];
-   const tol=Math.max(45, (o.width||30)*1.5);
-   if(!c || o.left-(c.maxLeft||0)>tol){ c={items:[],maxLeft:o.left}; clusters.push(c); }
-   c.items.push(o); c.maxLeft=Math.max(c.maxLeft,o.left);
- }
- return clusters;
-}
-function findCodes(text, overlayLines=[]){
- const occ=findCodeOccurrences(overlayLines);
- if(occ.length){
-   // ستون کد کالا معمولاً راست‌ترین ستون عددی جدول است.
-   const clusters=clusterX(occ).filter(c=>c.items.length>=1);
-   const right=clusters.sort((a,b)=>b.maxLeft-a.maxLeft)[0];
-   const selected=right.items
-     .sort((a,b)=>a.top-b.top)
-     .filter((x,i,a)=>i===0 || Math.abs(x.top-a[i-1].top)>Math.max(8,(x.height||20)*0.6));
-   const seen=new Set();
-   return selected.filter(x=>{if(seen.has(x.code))return false;seen.add(x.code);return true}).map(x=>byCode.get(x.code));
- }
+function findCodes(text){
  const clean=norm(text), found=[];
  for(const p of products){
    const code=String(p.code);
    const re=new RegExp("(^|[^0-9])"+code+"([^0-9]|$)");
-   if(re.test(clean)) found.push(p);
+   if(re.test(clean) || clean.includes(code)) found.push(p);
  }
  return found;
-}
-
-function findCodeOccurrencesForProduct(code, overlayLines=[]){
- return findCodeOccurrences(overlayLines).filter(x=>x.code===String(code));
-}
-
-function quantityFromOverlay(code, overlayLines=[]){
- const occ=findCodeOccurrencesForProduct(code,overlayLines);
- if(!occ.length) return null;
- const target=occ.sort((a,b)=>a.top-b.top)[0];
- const ty=target.top, th=Math.max(target.height||20,18);
- const candidates=[];
- for(const line of overlayLines||[]){
-   for(const w of (line.words||[])){
-     const n=numericWord(w.text);
-     if(n==null || n<1 || n>999) continue;
-     if(String(n)===String(code)) continue;
-     const top=Number(w.top)||0, h=Math.max(Number(w.height)||20,18);
-     const vertical=Math.abs((top+h/2)-(ty+th/2));
-     if(vertical>Math.max(18,th*0.9)) continue;
-     const left=Number(w.left)||0;
-     // مقدار در فاکتور نمونه بلافاصله سمت چپ ستون کد است؛ قیمت و متن کالا دورترند.
-     if(left >= target.left-260 && left < target.left-8) candidates.push({n,left,vertical});
-   }
- }
- if(!candidates.length) return null;
- // نزدیک‌ترین عدد کوچک به ستون کد = مقدار/تعداد ردیف.
- candidates.sort((a,b)=>b.left-a.left || a.vertical-b.vertical);
- return {qty:candidates[0].n,confidence:'high',source:'ستون مقدار فاکتور'};
 }
 
 function explicitQty(line){
@@ -173,24 +99,28 @@ function numbersInLine(line){
 }
 
 function extractQuantityForCode(lines,code,index){
+ // 1) همان خط و دو خط اطراف: فقط اگر کنار کلمات تعداد باشد.
  for(let d=0;d<=2;d++){
    for(const i of [index+d,index-d]){
      if(i<0||i>=lines.length) continue;
      const q=explicitQty(lines[i]); if(q!=null) return {qty:q,confidence:"high",source:"کنار کد"};
    }
  }
+ // 2) اگر یک ردیف جدول به شکل «کد ... تعداد» آمده باشد.
  if(index>=0){
    for(let d=0;d<=2;d++){
      const i=index+d; if(i>=lines.length) break;
      const ns=numbersInLine(lines[i]);
-     const filtered=ns.filter(n=>String(n)!==String(code) && n<=999);
-     if(filtered.length===1) return {qty:filtered[0],confidence:"medium",source:"نزدیک ردیف"};
+     const own=String(code);
+     const filtered=ns.filter(n=>String(n)!==own && String(n).length<=3);
+     if(filtered.length===1 && filtered[0]<=999) return {qty:filtered[0],confidence:"medium",source:"نزدیک ردیف"};
    }
  }
  return null;
 }
 
 function extractQuantitiesBlock(lines, needed){
+ // الگوی رایج OCR فاکتورهای فارسی: بعد از «مقدار کل/تعداد» تعدادها به صورت ستونی می‌آیند.
  let start=-1;
  for(let i=0;i<lines.length;i++) if(/(?:مقدار\s*کل|تعداد\s*کل|مقدار|تعداد)\s*[:：]?$/i.test(norm(lines[i]))) {start=i;break;}
  if(start<0) return [];
@@ -199,6 +129,7 @@ function extractQuantitiesBlock(lines, needed){
    const s=norm(lines[i]);
    if(!s || /^عدد$|^تعداد$|^مقدار$/.test(s)) continue;
    if(isBadContext(s)) continue;
+   // قیمت‌ها، شماره‌ها و اعداد بزرگ را کنار می‌گذاریم.
    if(/\d[\d,]{4,}/.test(s)) continue;
    const ns=numbersInLine(s);
    if(ns.length===1) vals.push(ns[0]);
@@ -206,22 +137,31 @@ function extractQuantitiesBlock(lines, needed){
  return vals;
 }
 
-function extractItems(text, overlayLines=[]){
+function extractItems(text){
  const lines=norm(text).split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
- const found=findCodes(text,overlayLines);
- if(!found.length) return [];
+ const found=findCodes(text);
+ // ترتیب کدها را مطابق اولین حضور در OCR نگه می‌داریم.
+ found.sort((a,b)=>lines.findIndex(l=>new RegExp("(^|[^0-9])"+a.code+"([^0-9]|$)").test(l))-lines.findIndex(l=>new RegExp("(^|[^0-9])"+b.code+"([^0-9]|$)").test(l)));
+ const blockQty=extractQuantitiesBlock(lines,found.length);
  const items=[];
- found.forEach((p)=>{
-   let q=quantityFromOverlay(p.code,overlayLines);
-   if(!q){
-     // پشتیبان محدود: فقط وقتی خط صریحاً تعداد را کنار کد نوشته باشد.
-     const lineIndex=lines.findIndex(l=>new RegExp("(^|[^0-9])"+p.code+"([^0-9]|$)").test(l));
-     q=extractQuantityForCode(lines,p.code,lineIndex);
-   }
-   if(!q) q={qty:0,confidence:'low',source:'تعداد از فاکتور تشخیص داده نشد'};
+ found.forEach((p,idx)=>{
+   const lineIndex=lines.findIndex(l=>new RegExp("(^|[^0-9])"+p.code+"([^0-9]|$)").test(l));
+   let q=extractQuantityForCode(lines,p.code,lineIndex);
+   if(!q && blockQty[idx]!=null) q={qty:blockQty[idx],confidence:"medium",source:"بخش تعداد فاکتور"};
+   if(!q) q={qty:1,confidence:"low",source:"قابل تشخیص نبود؛ نیازمند بررسی"};
    items.push({code:String(p.code),name:p.name,qty:q.qty,confidence:q.confidence,source:q.source});
  });
  return items;
+}
+
+
+function extractTable(overlay){
+ const ws=(overlay||[]).flatMap(l=>(l.words||[]).map(w=>({t:norm(w.text||''),x:+w.left||0,y:(+w.top||0)+(+w.height||0)/2,h:+w.height||14}))).filter(w=>w.t);
+ const maxX=Math.max(1,...ws.map(w=>w.x)); const codes=[];
+ for(const w of ws){const p=byCode.get(digits(w.t)); if(p&&w.x/maxX>.72) codes.push({p,w})}
+ codes.sort((a,b)=>a.w.y-b.w.y); const rows=[];
+ for(const c of codes) if(!rows.some(r=>Math.abs(r.w.y-c.w.y)<Math.max(10,c.w.h))) rows.push(c);
+ return rows.map(r=>{const nums=ws.filter(w=>Math.abs(w.y-r.w.y)<Math.max(22,r.w.h*2)&&w.x/maxX>.48&&w.x/maxX<.70).map(w=>({w,n:Number(digits(w.t).replace(/[^0-9]/g,''))})).filter(z=>z.n>0&&z.n<1000);nums.sort((a,b)=>Math.abs(a.w.y-r.w.y)-Math.abs(b.w.y-r.w.y));return {code:String(r.p.code),name:r.p.name,qty:nums[0]?.n||null,confidence:nums.length?'high':'low',source:nums.length?'ستون مقدار فاکتور':'نیازمند بررسی'};});
 }
 
 function renderItems(items){
@@ -236,7 +176,7 @@ function renderItems(items){
  let h='<table><thead><tr><th>#</th><th>کد</th><th>نام کالا</th><th>تعداد</th><th>وضعیت</th></tr></thead><tbody>';
  items.forEach((x,i)=>{
    const st=x.confidence==='high'?'<span class="good">✓ مطمئن</span>':`<span class="warn">⚠ ${escapeHtml(x.source)}</span>`;
-   h+=`<tr><td>${toFa(i+1)}</td><td class="code">${escapeHtml(x.code)}</td><td>${escapeHtml(x.name)}</td><td><input class="qty" data-i="${i}" type="number" min="1" step="1" value="${Number(x.qty)||0}"></td><td>${st}</td></tr>`;
+   h+=`<tr><td>${toFa(i+1)}</td><td class="code">${escapeHtml(x.code)}</td><td>${escapeHtml(x.name)}</td><td><input class="qty" data-i="${i}" type="number" min="1" step="1" value="${Number(x.qty)||1}"></td><td>${st}</td></tr>`;
  });
  h+='</tbody></table>';
  $("items").innerHTML=h;
@@ -274,7 +214,7 @@ async function runOCR(file){
  const d=await r.json().catch(()=>({ok:false,error:'پاسخ سرور قابل خواندن نیست.'}));
  if(!r.ok||!d.ok){throw new Error(d.error||'OCR ناموفق بود.');}
  $("bar").style.width='80%';lastText=d.text||'';$("raw").textContent=lastText||'(متن خالی)';
- const items=extractItems(lastText,lastOverlay);$("bar").style.width='100%';
+ const items=extractTable(d.overlayLines||[]);$("bar").style.width='100%';
  if(!items.length){setStatus('OCR انجام شد، اما هیچ کد معتبر از بانک ۱۸۶۴ محصول پیدا نشد. متن خام را بررسی کن.','err');$("resultCard").classList.add('hidden');return;}
  renderItems(items);setStatus(`OCR موفق بود؛ ${items.length} ردیف کالا از بانک محصولات شناسایی شد.`,'ok');
 }
