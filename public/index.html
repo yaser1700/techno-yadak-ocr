@@ -2,99 +2,221 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>تست OCR تکنو یدک</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>کنترل سفارش تکنو یدک</title>
 <style>
-body{font-family:Tahoma,Arial,sans-serif;background:#f5f7fa;margin:0;padding:24px;color:#222}
-.box{max-width:720px;margin:auto;background:#fff;padding:22px;border-radius:16px;box-shadow:0 4px 20px #0001}
-button{padding:12px 18px;border:0;border-radius:10px;background:#1769e0;color:#fff;font-size:16px;cursor:pointer}
-button:disabled{opacity:.6}
-pre{white-space:pre-wrap;background:#f1f3f5;padding:14px;border-radius:10px;min-height:120px;direction:rtl;text-align:right}
-.ok{color:#14833b}.err{color:#b42318}.info{color:#444}
-small{color:#666;line-height:1.8}
+*{box-sizing:border-box}body{margin:0;background:#eef2f7;color:#182230;font-family:Tahoma,Arial,sans-serif}.wrap{max-width:820px;margin:auto;padding:14px}.card{background:#fff;border-radius:22px;padding:18px;margin:12px 0;box-shadow:0 5px 22px #00000010}h1{font-size:23px;margin:0 0 6px}h2{font-size:18px;margin:0 0 12px}.muted{color:#667085;line-height:1.9}.badge{display:inline-block;padding:6px 10px;border-radius:99px;background:#edf2ff;color:#244ea5;font-size:12px;margin-top:8px}.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:140px}input[type=file]{width:100%;padding:12px;border:1px solid #d8dde6;border-radius:13px;background:#fff}button{border:0;border-radius:14px;padding:13px 16px;font-size:16px;font-weight:bold;cursor:pointer}.primary{background:#2867df;color:#fff;width:100%;margin-top:10px}.secondary{background:#edf2ff;color:#234da5}.danger{background:#ffe9e9;color:#9b2222}.status{padding:12px 14px;border-radius:14px;margin-top:12px;line-height:1.9}.ok{background:#e9f8ef;color:#146b37}.err{background:#ffe9e9;color:#9a2020}.wait{background:#fff4df;color:#875700}.hidden{display:none}.tableWrap{overflow:auto}table{width:100%;border-collapse:collapse;margin-top:10px;min-width:600px}th,td{padding:10px;border-bottom:1px solid #eceff3;text-align:right;vertical-align:middle}th{background:#f7f8fa}.code{font-weight:bold;direction:ltr;text-align:right}.qty{width:90px;padding:9px;border:1px solid #cfd6df;border-radius:10px;font-size:16px}.warn{color:#9a5b00;font-size:12px;display:block;margin-top:4px}.good{color:#146b37}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.sum{background:#f7f8fa;border-radius:14px;padding:12px;text-align:center}.sum b{display:block;font-size:20px;margin-bottom:4px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.actions button{flex:1;min-width:140px}.preview{width:100%;max-height:360px;object-fit:contain;border-radius:14px;background:#f5f6f8;margin-top:10px}.small{font-size:12px;color:#667085}.progress{height:7px;background:#e7eaf0;border-radius:99px;overflow:hidden;margin-top:10px}.progress>div{height:100%;width:0;background:#2867df;transition:width .3s}.picker{padding:12px;border:1px solid #d8dde6;border-radius:13px;width:100%;font-size:16px}
 </style>
 </head>
 <body>
-<div class="box">
-<h2>تست OCR تکنو یدک</h2>
-<p>یک عکس فاکتور انتخاب کنید. عکس قبل از ارسال به حداکثر حدود ۱ مگابایت فشرده می‌شود.</p>
-<input id="file" type="file" accept="image/*" capture="environment">
-<br><br>
-<button id="btn">اجرای OCR</button>
-<p id="status" class="info"></p>
-<small id="info"></small>
-<pre id="out">هنوز نتیجه‌ای دریافت نشده است.</pre>
+<div class="wrap">
+<div class="card">
+  <h1>📦 کنترل جمع‌آوری سفارش</h1>
+  <div class="muted">تکنو یدک پارت عباسی</div>
+  <span class="badge">بانک محصولات: ۱۸۶۴ کد</span>
 </div>
-<script>
-const fileInput=document.getElementById("file");
-const btn=document.getElementById("btn");
-const statusEl=document.getElementById("status");
-const out=document.getElementById("out");
-const info=document.getElementById("info");
 
-function compressImage(file,maxBytes=950000){
+<div class="card">
+  <h2>۱) مشخصات جمع‌آوری</h2>
+  <input id="picker" class="picker" placeholder="نام جمع‌آور / انباردار">
+  <div class="small" style="margin-top:8px">نام در همین دستگاه نگهداری می‌شود تا برای فاکتور بعدی دوباره وارد نشود.</div>
+</div>
+
+<div class="card">
+  <h2>۲) عکس فاکتور</h2>
+  <input id="invoice" type="file" accept="image/*" capture="environment">
+  <img id="preview" class="preview hidden" alt="پیش‌نمایش فاکتور">
+  <button id="go" class="primary">📷 خواندن و استخراج اقلام فاکتور</button>
+  <div id="st" class="status hidden"></div>
+  <div class="progress"><div id="bar"></div></div>
+  <div id="info" class="small" style="margin-top:8px"></div>
+  <div id="retry" class="hidden" style="margin-top:10px"><button id="again" class="secondary">🔄 تلاش مجدد</button></div>
+</div>
+
+<div id="resultCard" class="card hidden">
+  <h2>۳) اقلام قابل جمع‌آوری</h2>
+  <div id="resultNote" class="status wait"></div>
+  <div class="summary">
+    <div class="sum"><b id="countItems">۰</b>ردیف</div>
+    <div class="sum"><b id="countQty">۰</b>جمع تعداد</div>
+    <div class="sum"><b id="countWarn">۰</b>نیازمند بررسی</div>
+  </div>
+  <div class="tableWrap" id="items"></div>
+  <div class="actions">
+    <button id="saveOrder" class="secondary">💾 ذخیره فاکتور</button>
+    <button id="copyOrder" class="secondary">📋 کپی لیست</button>
+    <button id="printOrder" class="secondary">🖨️ چاپ</button>
+  </div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>متن خام OCR</summary>
+    <pre id="raw" style="white-space:pre-wrap;line-height:1.8;background:#f7f8fa;border-radius:12px;padding:12px;max-height:360px;overflow:auto">هنوز OCR اجرا نشده است.</pre>
+  </details>
+</div>
+
+<div class="card">
+  <h2>۴) مرحله بعد: کنترل بسته‌ها</h2>
+  <div class="muted">بعد از تأیید فاکتور، اسکن بارکد/کد و تعداد واقعی هر بسته به این بخش اضافه می‌شود. تعداد داخل بسته از روی لیبل همان بسته خوانده خواهد شد و مقدار ثابت از بانک کالا استفاده نمی‌شود.</div>
+</div>
+</div>
+
+<script src="/products.js"></script>
+<script>
+const products=Array.isArray(window.PRODUCT_BANK)?window.PRODUCT_BANK:[];
+const byCode=new Map(products.map(p=>[String(p.code),p]));
+const $=id=>document.getElementById(id);
+let lastFile=null,lastText="",currentItems=[],busy=false;
+$("picker").value=localStorage.getItem("techno_picker_name")||"";
+$("picker").addEventListener("change",()=>localStorage.setItem("techno_picker_name",$("picker").value.trim()));
+
+function norm(s){return String(s||"").replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[٬،]/g,",").replace(/[٫]/g,".").replace(/[‐‑–—]/g,"-").replace(/\u200c/g," ").replace(/\s+/g," ").trim()}
+function digits(s){return norm(s).replace(/,/g,"")}
+function setStatus(t,c){$("st").className="status "+c;$("st").textContent=t;$("st").classList.remove("hidden")}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+function isBadContext(s){return /(موبایل|همراه|تلفن|تماس|آدرس|نشانی|کد\s*پست|پستی|تاریخ|حساب|شبا|بانک|مبلغ|جمع|مالیات|ارزش افزوده|شماره اقتصادی|شماره کارت|وب سایت|www|http)/i.test(norm(s))}
+function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+
+function findCodes(text){
+ const clean=norm(text), found=[];
+ for(const p of products){
+   const code=String(p.code);
+   const re=new RegExp("(^|[^0-9])"+code+"([^0-9]|$)");
+   if(re.test(clean) || clean.includes(code)) found.push(p);
+ }
+ return found;
+}
+
+function explicitQty(line){
+ const s=norm(line);
+ const m=s.match(/(?:تعداد|مقدار|تعداد\s*کل|مقدار\s*کل|عدد|دست|بسته|کارتن)\s*[:\-]?\s*(\d{1,4})(?!\d)/);
+ return m?Number(m[1]):null;
+}
+function numbersInLine(line){
+ const s=norm(line); if(isBadContext(s)) return [];
+ return [...s.matchAll(/(?:^|[^0-9])([0-9]{1,4})(?:$|[^0-9])/g)].map(m=>Number(m[1])).filter(n=>n>=1&&n<=999);
+}
+
+function extractQuantityForCode(lines,code,index){
+ // 1) همان خط و دو خط اطراف: فقط اگر کنار کلمات تعداد باشد.
+ for(let d=0;d<=2;d++){
+   for(const i of [index+d,index-d]){
+     if(i<0||i>=lines.length) continue;
+     const q=explicitQty(lines[i]); if(q!=null) return {qty:q,confidence:"high",source:"کنار کد"};
+   }
+ }
+ // 2) اگر یک ردیف جدول به شکل «کد ... تعداد» آمده باشد.
+ if(index>=0){
+   for(let d=0;d<=2;d++){
+     const i=index+d; if(i>=lines.length) break;
+     const ns=numbersInLine(lines[i]);
+     const own=String(code);
+     const filtered=ns.filter(n=>String(n)!==own && String(n).length<=3);
+     if(filtered.length===1 && filtered[0]<=999) return {qty:filtered[0],confidence:"medium",source:"نزدیک ردیف"};
+   }
+ }
+ return null;
+}
+
+function extractQuantitiesBlock(lines, needed){
+ // الگوی رایج OCR فاکتورهای فارسی: بعد از «مقدار کل/تعداد» تعدادها به صورت ستونی می‌آیند.
+ let start=-1;
+ for(let i=0;i<lines.length;i++) if(/(?:مقدار\s*کل|تعداد\s*کل|مقدار|تعداد)\s*[:：]?$/i.test(norm(lines[i]))) {start=i;break;}
+ if(start<0) return [];
+ const vals=[];
+ for(let i=start+1;i<lines.length && vals.length<needed;i++){
+   const s=norm(lines[i]);
+   if(!s || /^عدد$|^تعداد$|^مقدار$/.test(s)) continue;
+   if(isBadContext(s)) continue;
+   // قیمت‌ها، شماره‌ها و اعداد بزرگ را کنار می‌گذاریم.
+   if(/\d[\d,]{4,}/.test(s)) continue;
+   const ns=numbersInLine(s);
+   if(ns.length===1) vals.push(ns[0]);
+ }
+ return vals;
+}
+
+function extractItems(text){
+ const lines=norm(text).split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+ const found=findCodes(text);
+ // ترتیب کدها را مطابق اولین حضور در OCR نگه می‌داریم.
+ found.sort((a,b)=>lines.findIndex(l=>new RegExp("(^|[^0-9])"+a.code+"([^0-9]|$)").test(l))-lines.findIndex(l=>new RegExp("(^|[^0-9])"+b.code+"([^0-9]|$)").test(l)));
+ const blockQty=extractQuantitiesBlock(lines,found.length);
+ const items=[];
+ found.forEach((p,idx)=>{
+   const lineIndex=lines.findIndex(l=>new RegExp("(^|[^0-9])"+p.code+"([^0-9]|$)").test(l));
+   let q=extractQuantityForCode(lines,p.code,lineIndex);
+   if(!q && blockQty[idx]!=null) q={qty:blockQty[idx],confidence:"medium",source:"بخش تعداد فاکتور"};
+   if(!q) q={qty:1,confidence:"low",source:"قابل تشخیص نبود؛ نیازمند بررسی"};
+   items.push({code:String(p.code),name:p.name,qty:q.qty,confidence:q.confidence,source:q.source});
+ });
+ return items;
+}
+
+function renderItems(items){
+ currentItems=items.map(x=>({...x}));
+ $("resultCard").classList.remove("hidden");
+ let warn=items.filter(x=>x.confidence!=="high").length;
+ $("countItems").textContent=toFa(items.length);
+ $("countQty").textContent=toFa(items.reduce((a,x)=>a+Number(x.qty||0),0));
+ $("countWarn").textContent=toFa(warn);
+ $("resultNote").textContent=warn?`فاکتور خوانده شد. ${warn} ردیف برای اطمینان نیاز به بررسی تعداد دارد.`:"فاکتور خوانده شد و تعداد همه ردیف‌ها با اطمینان بالا تشخیص داده شد.";
+ $("resultNote").className="status "+(warn?"wait":"ok");
+ let h='<table><thead><tr><th>#</th><th>کد</th><th>نام کالا</th><th>تعداد</th><th>وضعیت</th></tr></thead><tbody>';
+ items.forEach((x,i)=>{
+   const st=x.confidence==='high'?'<span class="good">✓ مطمئن</span>':`<span class="warn">⚠ ${escapeHtml(x.source)}</span>`;
+   h+=`<tr><td>${toFa(i+1)}</td><td class="code">${escapeHtml(x.code)}</td><td>${escapeHtml(x.name)}</td><td><input class="qty" data-i="${i}" type="number" min="1" step="1" value="${Number(x.qty)||1}"></td><td>${st}</td></tr>`;
+ });
+ h+='</tbody></table>';
+ $("items").innerHTML=h;
+ document.querySelectorAll('.qty').forEach(el=>el.addEventListener('change',()=>{const i=Number(el.dataset.i);currentItems[i].qty=Math.max(1,Number(el.value)||1);updateSummary();}));
+}
+function updateSummary(){
+ $("countQty").textContent=toFa(currentItems.reduce((a,x)=>a+Number(x.qty||0),0));
+ $("countWarn").textContent=toFa(currentItems.filter(x=>x.confidence!=="high").length);
+}
+function toFa(n){return String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d])}
+
+async function compressImage(file,maxBytes=900000){
+ if(file.size<=maxBytes) return file;
  return new Promise((resolve,reject)=>{
-  const img=new Image();
-  const url=window.URL.createObjectURL(file);
+  const img=new Image(),url=window.URL.createObjectURL(file);
   img.onload=()=>{
    window.URL.revokeObjectURL(url);
-   let w=img.naturalWidth,h=img.naturalHeight;
-   const maxSide=1800;
-   if(Math.max(w,h)>maxSide){
-    const s=maxSide/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s);
-   }
-   const canvas=document.createElement("canvas");
-   canvas.width=w;canvas.height=h;
-   const ctx=canvas.getContext("2d");
-   ctx.drawImage(img,0,0,w,h);
-   let quality=0.82;
-   const make=()=>canvas.toBlob(blob=>{
-    if(!blob){reject(new Error("فشرده‌سازی عکس انجام نشد."));return;}
-    if(blob.size<=maxBytes || quality<=0.45){
-     resolve(new File([blob],"invoice.jpg",{type:"image/jpeg"}));
-    }else{
-     quality-=0.07; make();
-    }
-   },"image/jpeg",quality);
+   let w=img.naturalWidth,h=img.naturalHeight,maxSide=1900;
+   if(Math.max(w,h)>maxSide){const s=maxSide/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s)}
+   const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);
+   let q=.84;
+   const make=()=>c.toBlob(blob=>{if(!blob)return reject(Error('فشرده‌سازی عکس انجام نشد.'));if(blob.size<=maxBytes||q<=.45)resolve(new File([blob],'invoice.jpg',{type:'image/jpeg'}));else{q-=.07;make()}},'image/jpeg',q);
    make();
   };
-  img.onerror=()=>{window.URL.revokeObjectURL(url);reject(new Error("خواندن عکس انجام نشد."));};
-  img.src=url;
+  img.onerror=()=>{window.URL.revokeObjectURL(url);reject(Error('خواندن تصویر انجام نشد.'))};img.src=url;
  });
 }
 
-btn.onclick=async()=>{
- const file=fileInput.files[0];
- if(!file){statusEl.className="err";statusEl.textContent="ابتدا یک عکس انتخاب کنید.";return;}
- btn.disabled=true;
- statusEl.className="info";
- statusEl.textContent="در حال آماده‌سازی عکس...";
- out.textContent="";info.textContent="";
- try{
-  const smallFile=await compressImage(file);
-  info.textContent=`حجم عکس اصلی: ${(file.size/1024/1024).toFixed(2)} MB — حجم ارسال: ${(smallFile.size/1024/1024).toFixed(2)} MB`;
-  statusEl.textContent="در حال ارسال عکس برای OCR...";
-  const form=new FormData();
-  form.append("file",smallFile,smallFile.name);
-  const r=await fetch("/api/ocr",{method:"POST",body:form});
-  const data=await r.json().catch(()=>({ok:false,error:"پاسخ سرور قابل خواندن نیست."}));
-  if(!r.ok||!data.ok){
-   const details=[];
-   if(data.debugCode) details.push("کد: "+data.debugCode);
-   if(data.providerStatus) details.push("HTTP OCR: "+data.providerStatus);
-   if(data.provider?.ErrorMessage) details.push("پیام OCR: "+data.provider.ErrorMessage);
-   if(data.provider?.ErrorDetails) details.push("جزئیات OCR: "+data.provider.ErrorDetails);
-   throw new Error((data.error||"OCR ناموفق بود")+(details.length?" | "+details.join(" | "):""));
-  }
-  statusEl.className="ok";
-  statusEl.textContent="OCR با موفقیت انجام شد.";
-  out.textContent=data.text||"(متن قابل تشخیص پیدا نشد)";
- }catch(e){
-  statusEl.className="err";
-  statusEl.textContent="خطا: "+e.message;
-  console.error(e);
- }finally{btn.disabled=false;}
-};
+async function runOCR(file){
+ const small=await compressImage(file);
+ $("info").textContent=`حجم اصلی: ${(file.size/1024/1024).toFixed(2)} MB — حجم ارسال: ${(small.size/1024/1024).toFixed(2)} MB`;
+ $("bar").style.width='35%';setStatus('در حال ارسال فاکتور برای OCR فارسی...','wait');
+ const fd=new FormData();fd.append('file',small,small.name);
+ const r=await fetch('/api/ocr',{method:'POST',body:fd});
+ const d=await r.json().catch(()=>({ok:false,error:'پاسخ سرور قابل خواندن نیست.'}));
+ if(!r.ok||!d.ok){throw new Error(d.error||'OCR ناموفق بود.');}
+ $("bar").style.width='80%';lastText=d.text||'';$("raw").textContent=lastText||'(متن خالی)';
+ const items=extractItems(lastText);$("bar").style.width='100%';
+ if(!items.length){setStatus('OCR انجام شد، اما هیچ کد معتبر از بانک ۱۸۶۴ محصول پیدا نشد. متن خام را بررسی کن.','err');$("resultCard").classList.add('hidden');return;}
+ renderItems(items);setStatus(`OCR موفق بود؛ ${items.length} ردیف کالا از بانک محصولات شناسایی شد.`,'ok');
+}
+
+$("invoice").addEventListener('change',()=>{const f=$("invoice").files[0];if(!f)return;lastFile=f;const u=URL.createObjectURL(f);$("preview").src=u;$("preview").classList.remove('hidden');});
+$("go").onclick=async()=>{if(busy)return;const f=$("invoice").files[0];if(!f)return setStatus('ابتدا عکس فاکتور را انتخاب کن.','err');busy=true;$("go").disabled=true;$("bar").style.width='5%';try{await runOCR(f)}catch(e){setStatus('OCR انجام نشد: '+e.message,'err');$("retry").classList.remove('hidden')}finally{busy=false;$("go").disabled=false}};
+$("again").onclick=async()=>{if(!lastFile||busy)return;busy=true;try{await runOCR(lastFile)}catch(e){setStatus('OCR انجام نشد: '+e.message,'err')}finally{busy=false}};
+
+function buildText(){let picker=$("picker").value.trim()||'ثبت نشده';let s=`کنترل جمع‌آوری سفارش - تکنو یدک پارت عباسی\nجمع‌آور: ${picker}\n\n`;currentItems.forEach((x,i)=>s+=`${i+1}. کد ${x.code} - ${x.name} - تعداد: ${x.qty}\n`);return s}
+$("copyOrder").onclick=async()=>{try{await navigator.clipboard.writeText(buildText());alert('لیست کپی شد.')}catch(e){alert('کپی خودکار در این مرورگر در دسترس نیست.')}};
+$("saveOrder").onclick=()=>{const data={createdAt:new Date().toISOString(),picker:$("picker").value.trim(),items:currentItems,ocrText:lastText};localStorage.setItem('techno_last_order',JSON.stringify(data));alert('فاکتور روی همین دستگاه ذخیره شد.')};
+$("printOrder").onclick=()=>window.print();
 </script>
 </body>
 </html>
