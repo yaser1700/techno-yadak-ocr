@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: techno-yadak-ocr
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: OCR_API_KEY
+        sync: false
