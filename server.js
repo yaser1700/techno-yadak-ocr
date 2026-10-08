@@ -47,7 +47,7 @@ app.post("/api/ocr", upload.single("file"), async (req, res) => {
     form.append("isTable", "true");
     form.append("detectOrientation", "true");
     form.append("scale", "true");
-    form.append("isOverlayRequired", "false");
+    form.append("isOverlayRequired", "true");
     form.append("file", req.file.buffer, { filename:req.file.originalname || "invoice.jpg", contentType:req.file.mimetype || "image/jpeg" });
 
     const controller = new AbortController();
@@ -70,8 +70,16 @@ app.post("/api/ocr", upload.single("file"), async (req, res) => {
 
     const parsed = Array.isArray(data.ParsedResults) ? data.ParsedResults : [];
     const text = parsed.map(x => x.ParsedText || "").join("\n");
-    console.log("[OCR] success", { parsedResults:parsed.length, textLength:text.length, elapsedMs:Date.now()-started });
-    return res.json({ ok:true, text, provider:{ocrExitCode:data.OCRExitCode, processingTimeInMilliseconds:data.ProcessingTimeInMilliseconds, parsedResults:parsed.length} });
+    const overlayLines = parsed.flatMap((x, pageIndex) => {
+      const lines = x?.TextOverlay?.Lines || [];
+      return lines.map(line => ({
+        page: pageIndex,
+        text: line.LineText || "",
+        words: (line.Words || []).map(w => ({ text:w.WordText || "", left:w.Left, top:w.Top, width:w.Width, height:w.Height }))
+      }));
+    });
+    console.log("[OCR] success", { parsedResults:parsed.length, textLength:text.length, overlayLines:overlayLines.length, elapsedMs:Date.now()-started });
+    return res.json({ ok:true, text, overlayLines, provider:{ocrExitCode:data.OCRExitCode, processingTimeInMilliseconds:data.ProcessingTimeInMilliseconds, parsedResults:parsed.length} });
   } catch (err) {
     console.error("[OCR] request exception", err);
     return res.status(500).json({ ok:false, error:err?.message || String(err), debugCode:err?.name === "AbortError" ? "PROVIDER_TIMEOUT" : "SERVER_EXCEPTION", elapsedMs:Date.now()-started });
