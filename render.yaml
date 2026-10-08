@@ -5,7 +5,6 @@ services:
     plan: free
     buildCommand: npm install
     startCommand: npm start
-    healthCheckPath: /health
     envVars:
       - key: OCR_API_KEY
         sync: false

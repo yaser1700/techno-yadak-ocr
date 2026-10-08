@@ -1,13 +1,13 @@
-# Techno Yadak OCR - Render Fixed
+# Techno Yadak OCR Backend - Debug v2
 
-نسخه اصلاح‌شده برای Render.
-API Key در GitHub قرار نمی‌گیرد و باید در Render با نام `OCR_API_KEY` تنظیم شود.
+این نسخه برای پیدا کردن علت خطای OCR provider request failed ساخته شده است.
 
-تنظیمات:
-- Runtime: Node
-- Build Command: `npm install`
-- Start Command: `npm start`
-- Plan: Free
-- Health Check: `/health`
+تغییرات مهم:
+- API key در هدر `apikey` به OCR.space ارسال می‌شود.
+- پاسخ و خطای واقعی OCR.space در Render Logs ثبت می‌شود.
+- خطاهای HTTP، خطای پردازش، timeout و API key ناموجود کد تشخیصی دارند.
+- عکس در صفحه تست قبل از ارسال به حدود زیر 1MB فشرده می‌شود؛ OCR.space در پلن Free محدودیت 1MB برای فایل دارد.
+- API key هرگز در صفحه مرورگر نمایش داده نمی‌شود.
 
-سرور روی `0.0.0.0` و پورت `process.env.PORT` اجرا می‌شود؛ مقدار پیش‌فرض 10000 است.
+Environment Variable در Render:
+`OCR_API_KEY`
