@@ -242,14 +242,68 @@ function extractQuantityColumnBlock(text, expectedCount){
  return {values,reason:values.length===expectedCount?'تعدادها از بلوک ستون مقدار استخراج شدند.':`از ${expectedCount} تعداد مورد انتظار، فقط ${values.length} مقدار مستقل پیدا شد.`};
 }
 
-function extractItemsFromText(text){
- const rows=extractMarkedProductRows(text);
- if(!rows.length) return [];
- const block=extractQuantityColumnBlock(text,rows.length);
- if(block.values.length!==rows.length){
-   return rows.map(r=>({code:r.code,name:r.name,qty:null,confidence:'low',source:block.reason}));
+function findInvoiceProductRows(text, overlayLines){
+ const lines=String(text||'').split(/\r?\n/).map((raw,index)=>({raw,s:norm(raw),index})).filter(x=>x.s);
+ let headerIndex=lines.findIndex(x=>/کد\s*کالا|شرح\s*کالا/.test(x.s));
+ const region=headerIndex>=0?lines.filter(x=>x.index>=headerIndex):lines;
+ const map=new Map();
+ for(const line of region){
+   const lineDigits=digits(line.s);
+   for(const p of products){
+     const re=new RegExp('(^|[^0-9])'+String(p.code)+'([^0-9]|$)');
+     if(re.test(lineDigits) && !map.has(String(p.code))) map.set(String(p.code),{code:String(p.code),name:p.name,lineIndex:line.index,sourceLine:line.s,y:null});
+   }
  }
- return rows.map((r,i)=>({code:r.code,name:r.name,qty:block.values[i],confidence:'medium',source:'از ستون مقدار به ترتیب ردیف‌ها؛ بررسی بصری پیش از ارسال'}));
+ const overlay=(overlayLines||[]).flatMap((line,li)=>(line.words||[]).map(w=>{return {t:digits(w.text||'').replace(/[^0-9]/g,''),x:Number(w.left)||0,y:(Number(w.top)||0)+(Number(w.height)||0)/2,h:Number(w.height)||12,li};})).filter(w=>w.t);
+ const maxX=Math.max(1,...overlay.map(w=>w.x));
+ const geoCodes=[];
+ for(const w of overlay){
+   const product=byCode.get(w.t);
+   if(product && w.x/maxX>=.72 && !geoCodes.some(x=>x.code===w.t)) geoCodes.push({code:w.t,name:product.name,lineIndex:w.li,sourceLine:'',y:w.y});
+ }
+ if(geoCodes.length){
+   geoCodes.sort((a,b)=>a.y-b.y);
+   const seen=new Set(geoCodes.map(x=>x.code));
+   for(const row of map.values()) if(!seen.has(row.code)) geoCodes.push(row);
+   return {rows:geoCodes,overlay,maxX,usedOverlay:true};
+ }
+ return {rows:[...map.values()].sort((a,b)=>a.lineIndex-b.lineIndex),overlay,maxX,usedOverlay:false};
+}
+function readInvoiceTotalQuantity(text){
+ const lines=String(text||'').split(/\r?\n/).map(norm);
+ for(let i=0;i<lines.length;i++){
+   if(/مقدار\s*کل/.test(lines[i])){
+     for(let j=i;j<Math.min(lines.length,i+5);j++){
+       const s=digits(lines[j]);
+       if(j>i && /جمع\s*کل|توضیحات|مالیات|تخفیف/.test(s)) break;
+       const m=s.match(/(?:^|\D)(\d{1,4})(?:\D|$)/);
+       if(m){const n=Number(m[1]);if(n>0&&n<=9999)return n;}
+     }
+   }
+ }
+ return null;
+}
+function quantitiesFromOverlay(rows, overlay, maxX){
+ if(!rows.length || !overlay.length) return [];
+ const qtyWords=overlay.filter(w=>w.x/maxX>=.38 && w.x/maxX<=.64 && /^\d{1,3}$/.test(w.t)).map(w=>({...w,n:Number(w.t)})).filter(w=>w.n>=1&&w.n<=999);
+ return rows.map(row=>{
+   if(!Number.isFinite(row.y)) return null;
+   const candidates=qtyWords.map(w=>({...w,dy:Math.abs(w.y-row.y)})).filter(w=>w.dy<=Math.max(13,(w.h||12)*1.15)).sort((a,b)=>a.dy-b.dy);
+   if(!candidates.length) return null;
+   if(candidates.length>1 && Math.abs(candidates[0].dy-candidates[1].dy)<2 && candidates[0].n!==candidates[1].n) return null;
+   return candidates[0].n;
+ });
+}
+function extractItemsFromText(text, overlayLines){
+ const found=findInvoiceProductRows(text,overlayLines);
+ const rows=found.rows;
+ if(!rows.length) return [];
+ const geomQty=quantitiesFromOverlay(rows,found.overlay,found.maxX);
+ const total=readInvoiceTotalQuantity(text);
+ let quantities=geomQty;
+ const allValid=quantities.length===rows.length && quantities.every(q=>Number.isInteger(q)&&q>0);
+ if(!allValid || (total!==null && quantities.reduce((a,b)=>a+b,0)!==total)) quantities=rows.map(()=>null);
+ return rows.map((r,i)=>({code:r.code,name:r.name,qty:quantities[i]??null,confidence:quantities[i]!=null?'high':'low',source:quantities[i]!=null?'تعداد از موقعیت ستون مقدار خوانده و با جمع فاکتور کنترل شد':'کد از بانک محصول شناسایی شد؛ تعداد برای جلوگیری از اشتباه نیاز به ورود/تأیید دستی دارد'}));
 }
 
 function extractTable(overlay){
@@ -322,7 +376,7 @@ async function runOCR(file){
  const d=await r.json().catch(()=>({ok:false,error:'پاسخ سرور قابل خواندن نیست.'}));
  if(!r.ok||!d.ok){throw new Error(d.error||'OCR ناموفق بود.');}
  $("bar").style.width='80%';lastText=d.text||'';$("raw").textContent=lastText||'(متن خالی)'; const detectedInvoice=extractInvoiceNumber(lastText); if(detectedInvoice && !$("invoiceNo").value) $("invoiceNo").value=detectedInvoice;
- const items=extractItemsFromText(lastText);$("bar").style.width='100%';
+ const items=extractItemsFromText(lastText,d.overlayLines);$("bar").style.width='100%';
  if(!items.length){setStatus('OCR انجام شد، اما هیچ کد معتبر از بانک ۱۸۶۴ محصول پیدا نشد. متن خام را بررسی کن.','err');$("resultCard").classList.add('hidden');return;}
  renderItems(items);setStatus(`OCR انجام شد؛ ${items.length} ردیف کددار پیدا شد. تعدادها را با تصویر فاکتور تطبیق بده.`,'wait');
 }
