@@ -18,3 +18,6 @@ Environment Variable:
 - نمایش هشدار برای مواردی که تعداد از OCR با اطمینان کافی قابل تشخیص نیست
 - امکان اصلاح دستی تعداد هر ردیف
 - ذخیره و نمایش فاکتور آماده جمع‌آوری
+
+
+Version 20: invoice number is the mission ID; extraction logic restored to the verified v16 table-column method.

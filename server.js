@@ -14,7 +14,6 @@ const PORT = Number(process.env.PORT) || 10000;
 const OCR_API_KEY = process.env.OCR_API_KEY || "";
 const OCR_URL = "https://api.ocr.space/parse/image";
 const ORDERS = new Map();
-function makeOrderId(){ return Math.random().toString(36).slice(2,8).toUpperCase(); }
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -22,10 +21,11 @@ app.use(express.static(path.join(__dirname, "public")));
 
 app.post("/api/orders", (req,res)=>{
   try {
-    const {picker, items, invoiceName} = req.body || {};
-    if(!picker || !Array.isArray(items) || !items.length) return res.status(400).json({ok:false,error:"نام جمع‌آور و اقلام فاکتور الزامی است."});
-    const id=makeOrderId();
-    const order={id,picker,invoiceName:invoiceName||"",items:items.map((x,i)=>({index:i,code:String(x.code||""),name:String(x.name||""),expectedQty:Number(x.qty)||0,actualQty:0,checked:false,issue:""})),status:"assigned",createdAt:new Date().toISOString()};
+    const {picker, items, invoiceNo, invoiceName} = req.body || {};
+    if(!picker || !invoiceNo || !Array.isArray(items) || !items.length) return res.status(400).json({ok:false,error:"شماره فاکتور، نام جمع‌آور و اقلام فاکتور الزامی است."});
+    const id=String(invoiceNo).trim();
+    if(ORDERS.has(id)) return res.status(409).json({ok:false,error:"برای این شماره فاکتور قبلاً مأموریت ساخته شده است."});
+    const order={id,picker,invoiceNo:id,invoiceName:invoiceName||"",items:items.map((x,i)=>({index:i,code:String(x.code||""),name:String(x.name||""),expectedQty:Number(x.qty)||0,actualQty:0,checked:false,issue:""})),status:"assigned",createdAt:new Date().toISOString()};
     ORDERS.set(id,order);
     res.json({ok:true,order});
   } catch(e){res.status(500).json({ok:false,error:e.message});}
