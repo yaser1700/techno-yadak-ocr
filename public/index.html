@@ -79,17 +79,7 @@
 </div>
 </div>
 
-<script src="/products.js">
-async function apiJson(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(opts.headers||{})},...opts});const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||`خطای سرور ${r.status}`);return d;}
-function renderWorkerOrder(o){
-  const h=o.items.map(x=>`<div class="card" style="margin:8px 0;padding:12px"><div style="font-weight:bold">کد ${escapeHtml(x.code)}</div><div>${escapeHtml(x.name)}</div><div class="row" style="margin-top:8px"><label style="flex:1">تعداد فاکتور: <b>${toFa(x.expectedQty)}</b></label><input class="qty workerQty" data-i="${x.index}" type="number" min="0" value="${x.actualQty||x.expectedQty}"><label style="min-width:100px"><input class="workerCheck" data-i="${x.index}" type="checkbox" ${x.checked?'checked':''}> جمع شد</label></div></div>`).join('');
-  $('workerItems').innerHTML=h;$('submitWorker').classList.remove('hidden');
-}
-let workerOrder=null;
-$('loadOrder').onclick=async()=>{try{const id=$('orderCode').value.trim().toUpperCase();if(!id)throw new Error('شماره فاکتور را وارد کن.');const d=await apiJson('/api/orders/'+encodeURIComponent(id));workerOrder=d.order;renderWorkerOrder(workerOrder);$('workerStatus').className='status ok';$('workerStatus').textContent=`ماموریت ${workerOrder.id} — ${workerOrder.picker}`;$('workerStatus').classList.remove('hidden');}catch(e){$('workerStatus').className='status err';$('workerStatus').textContent=e.message;$('workerStatus').classList.remove('hidden')}};
-$('submitWorker').onclick=async()=>{if(!workerOrder)return;const items=workerOrder.items.map(x=>{const q=document.querySelector(`.workerQty[data-i="${x.index}"]`);const c=document.querySelector(`.workerCheck[data-i="${x.index}"]`);return {...x,actualQty:Number(q?.value)||0,checked:Boolean(c?.checked)}});try{const d=await apiJson('/api/orders/'+workerOrder.id,{method:'PATCH',body:JSON.stringify({items,status:'collected'})});workerOrder=d.order;const issues=workerOrder.items.filter(x=>x.actualQty!==x.expectedQty);$('finalCheck').className='status '+(issues.length?'err':'ok');$('finalCheck').textContent=issues.length?`⚠️ ${toFa(issues.length)} ردیف نیازمند بررسی است: ${issues.map(x=>`کد ${x.code} (${x.issue})`).join('، ')}`:'✅ همه اقلام طبق فاکتور جمع‌آوری شده‌اند.';}catch(e){alert(e.message)}};
-$('assignOrder').onclick=async()=>{try{if(!currentItems.length)throw new Error('ابتدا فاکتور را بخوان.');const picker=$('picker').value.trim();if(!picker)throw new Error('نام جمع‌آور را انتخاب کن.'); if(!$("invoiceNo").value.trim())throw new Error('شماره فاکتور را وارد یا اصلاح کن.');const d=await apiJson('/api/orders',{method:'POST',body:JSON.stringify({picker,items:currentItems,invoiceNo:$("invoiceNo").value.trim(),invoiceName:lastFile?.name||''})});alert(`ماموریت ساخته شد.\nشماره فاکتور: ${d.order.id}\nاین کد را برای ${picker} بفرست.`);}catch(e){alert(e.message)}};
-</script>
+<script src="/products.js"></script>
 <script>
 const products=Array.isArray(window.PRODUCT_BANK)?window.PRODUCT_BANK:[];
 const byCode=new Map(products.map(p=>[String(p.code),p]));
@@ -187,14 +177,49 @@ function extractItems(text){
 
 
 function extractTable(overlay){
- const ws=(overlay||[]).flatMap(l=>(l.words||[]).map(w=>({t:norm(w.text||''),x:+w.left||0,y:(+w.top||0)+(+w.height||0)/2,h:+w.height||14}))).filter(w=>w.t);
- const maxX=Math.max(1,...ws.map(w=>w.x)); const codes=[];
- for(const w of ws){const p=byCode.get(digits(w.t)); if(p&&w.x/maxX>.72) codes.push({p,w})}
- codes.sort((a,b)=>a.w.y-b.w.y); const rows=[];
- for(const c of codes) if(!rows.some(r=>Math.abs(r.w.y-c.w.y)<Math.max(10,c.w.h))) rows.push(c);
- return rows.map(r=>{const nums=ws.filter(w=>Math.abs(w.y-r.w.y)<Math.max(22,r.w.h*2)&&w.x/maxX>.48&&w.x/maxX<.70).map(w=>({w,n:Number(digits(w.t).replace(/[^0-9]/g,''))})).filter(z=>z.n>0&&z.n<1000);nums.sort((a,b)=>Math.abs(a.w.y-r.w.y)-Math.abs(b.w.y-r.w.y));return {code:String(r.p.code),name:r.p.name,qty:nums[0]?.n||null,confidence:nums.length?'high':'low',source:nums.length?'ستون مقدار فاکتور':'نیازمند بررسی'};});
+ // Detect product-code tokens in the rightmost code column, then find the quantity
+ // column from the actual invoice header rather than a hard-coded x-range.
+ const ws=(overlay||[]).flatMap(l=>(l.words||[]).map(w=>{
+   const left=Number(w.left)||0, width=Number(w.width)||0, top=Number(w.top)||0, height=Number(w.height)||14;
+   return {t:norm(w.text||''), x:left, cx:left+width/2, y:top+height/2, h:height, width};
+ })).filter(w=>w.t);
+ if(!ws.length) return [];
+ const maxX=Math.max(1,...ws.map(w=>w.cx));
+ const codes=[];
+ for(const w of ws){
+   const p=byCode.get(digits(w.t).replace(/[^0-9]/g,''));
+   if(p && w.cx/maxX>.72) codes.push({p,w});
+ }
+ codes.sort((a,b)=>a.w.y-b.w.y);
+ const rows=[];
+ for(const c of codes){
+   if(!rows.some(r=>r.p.code===c.p.code && Math.abs(r.w.y-c.w.y)<Math.max(10,c.w.h))) rows.push(c);
+ }
+ if(!rows.length) return [];
+ // Quantity header must be above the first detected item row and in the table area.
+ const firstY=Math.min(...rows.map(r=>r.w.y));
+ const headerCandidates=ws.filter(w=>/(مقدار|تعداد)/.test(w.t) && w.y<firstY && w.cx/maxX>.20 && w.cx/maxX<.78)
+   .sort((a,b)=>b.y-a.y);
+ // Prefer a header directly above the table rows, not totals below the table.
+ const header=headerCandidates[0]||null;
+ if(!header){
+   return rows.map(r=>({code:String(r.p.code),name:r.p.name,qty:null,confidence:'low',source:'ستون تعداد در سربرگ فاکتور پیدا نشد؛ بررسی دستی لازم است'}));
+ }
+ const qx=header.cx;
+ const xTolerance=Math.max(18,maxX*0.055);
+ return rows.map(r=>{
+   const rowTolerance=Math.max(18,r.w.h*1.65);
+   const candidates=ws.filter(w=>{
+     if(Math.abs(w.y-r.w.y)>rowTolerance) return false;
+     if(Math.abs(w.cx-qx)>xTolerance) return false;
+     const raw=digits(w.t).replace(/,/g,'');
+     return /^\d{1,3}$/.test(raw) && Number(raw)>=1 && Number(raw)<=999;
+   }).map(w=>({w,n:Number(digits(w.t).replace(/,/g,''))}));
+   candidates.sort((a,b)=>Math.abs(a.w.y-r.w.y)-Math.abs(b.w.y-r.w.y));
+   const chosen=candidates[0];
+   return {code:String(r.p.code),name:r.p.name,qty:chosen?chosen.n:null,confidence:chosen?'high':'low',source:chosen?'ستون تعداد با تشخیص سربرگ':'تعداد در ستون صحیح پیدا نشد؛ بررسی دستی لازم است'};
+ });
 }
-
 function extractInvoiceNumber(text){
  const lines=String(text||"").split(/\r?\n/).map(x=>norm(x)).filter(Boolean);
  for(const line of lines){
@@ -218,11 +243,11 @@ function renderItems(items){
  let h='<table><thead><tr><th>#</th><th>کد</th><th>نام کالا</th><th>تعداد</th><th>وضعیت</th></tr></thead><tbody>';
  items.forEach((x,i)=>{
    const st=x.confidence==='high'?'<span class="good">✓ مطمئن</span>':`<span class="warn">⚠ ${escapeHtml(x.source)}</span>`;
-   h+=`<tr><td>${toFa(i+1)}</td><td class="code">${escapeHtml(x.code)}</td><td>${escapeHtml(x.name)}</td><td><input class="qty" data-i="${i}" type="number" min="1" step="1" value="${Number(x.qty)||1}"></td><td>${st}</td></tr>`;
+   h+=`<tr><td>${toFa(i+1)}</td><td class="code">${escapeHtml(x.code)}</td><td>${escapeHtml(x.name)}</td><td><input class="qty" data-i="${i}" type="number" min="1" step="1" value="${x.qty==null?'':Number(x.qty)}"></td><td>${st}</td></tr>`;
  });
  h+='</tbody></table>';
  $("items").innerHTML=h;
- document.querySelectorAll('.qty').forEach(el=>el.addEventListener('change',()=>{const i=Number(el.dataset.i);currentItems[i].qty=Math.max(1,Number(el.value)||1);updateSummary();}));
+ document.querySelectorAll('.qty').forEach(el=>el.addEventListener('change',()=>{const i=Number(el.dataset.i);currentItems[i].qty=el.value.trim()===""?null:Math.max(0,Number(el.value)||0);currentItems[i].confidence=currentItems[i].qty==null?"low":currentItems[i].confidence;updateSummary();}));
 }
 function updateSummary(){
  $("countQty").textContent=toFa(currentItems.reduce((a,x)=>a+Number(x.qty||0),0));
@@ -293,7 +318,7 @@ function renderWorkerOrder(o){
 let workerOrder=null;
 $('loadOrder').onclick=async()=>{try{const id=$('orderCode').value.trim().toUpperCase();if(!id)throw new Error('شماره فاکتور را وارد کن.');const d=await apiJson('/api/orders/'+encodeURIComponent(id));workerOrder=d.order;renderWorkerOrder(workerOrder);$('workerStatus').className='status ok';$('workerStatus').textContent=`ماموریت ${workerOrder.id} — ${workerOrder.picker}`;$('workerStatus').classList.remove('hidden');}catch(e){$('workerStatus').className='status err';$('workerStatus').textContent=e.message;$('workerStatus').classList.remove('hidden')}};
 $('submitWorker').onclick=async()=>{if(!workerOrder)return;const items=workerOrder.items.map(x=>{const q=document.querySelector(`.workerQty[data-i="${x.index}"]`);const c=document.querySelector(`.workerCheck[data-i="${x.index}"]`);return {...x,actualQty:Number(q?.value)||0,checked:Boolean(c?.checked)}});try{const d=await apiJson('/api/orders/'+workerOrder.id,{method:'PATCH',body:JSON.stringify({items,status:'collected'})});workerOrder=d.order;const issues=workerOrder.items.filter(x=>x.actualQty!==x.expectedQty);$('finalCheck').className='status '+(issues.length?'err':'ok');$('finalCheck').textContent=issues.length?`⚠️ ${toFa(issues.length)} ردیف نیازمند بررسی است: ${issues.map(x=>`کد ${x.code} (${x.issue})`).join('، ')}`:'✅ همه اقلام طبق فاکتور جمع‌آوری شده‌اند.';}catch(e){alert(e.message)}};
-$('assignOrder').onclick=async()=>{try{if(!currentItems.length)throw new Error('ابتدا فاکتور را بخوان.');const picker=$('picker').value.trim();if(!picker)throw new Error('نام جمع‌آور را انتخاب کن.'); if(!$("invoiceNo").value.trim())throw new Error('شماره فاکتور را وارد یا اصلاح کن.');const d=await apiJson('/api/orders',{method:'POST',body:JSON.stringify({picker,items:currentItems,invoiceNo:$("invoiceNo").value.trim(),invoiceName:lastFile?.name||''})});alert(`ماموریت ساخته شد.\nشماره فاکتور: ${d.order.id}\nاین کد را برای ${picker} بفرست.`);}catch(e){alert(e.message)}};
+$('assignOrder').onclick=async()=>{try{if(!currentItems.length)throw new Error('ابتدا فاکتور را بخوان.');if(currentItems.some(x=>x.qty==null||Number(x.qty)<=0))throw new Error('تعداد یک یا چند ردیف مشخص نیست. تعدادهای خالی یا صفر را از روی فاکتور اصلاح کن؛ مأموریت با تعداد حدسی ساخته نمی‌شود.');const picker=$('picker').value.trim();if(!picker)throw new Error('نام جمع‌آور را انتخاب کن.');if(!$('invoiceNo').value.trim())throw new Error('شماره فاکتور را وارد یا اصلاح کن.');const d=await apiJson('/api/orders',{method:'POST',body:JSON.stringify({picker,items:currentItems,invoiceNo:$('invoiceNo').value.trim(),invoiceName:lastFile?.name||''})});alert(`ماموریت ساخته شد.\nشماره فاکتور: ${d.order.id}\nاین شماره فاکتور را برای ${picker} بفرست.`);}catch(e){alert(e.message)}};
 </script>
 </body>
 </html>
