@@ -91,7 +91,9 @@ input,button,select,textarea{max-width:100%;min-width:0}
   <div class="muted">شماره فاکتور را وارد کن، سپس بارکد یا کد روی بسته را اسکن/وارد کن و تعداد واقعی همان بسته را ثبت کن. اگر لیبل تعداد داخل بسته دارد، آن مقدار را وارد کن؛ تعداد بسته از بانک کالا حدس زده نمی‌شود.</div>
   <div class="row" style="margin-top:10px"><input id="checkOrderCode" class="picker" placeholder="شماره فاکتور / مأموریت"><button id="loadCheckOrder" class="secondary">📥 بارگذاری فاکتور</button></div>
   <div id="checkOrderMeta" class="status wait hidden"></div>
-  <div class="row" style="margin-top:10px"><input id="scanCode" class="picker" placeholder="اسکن یا ورود کد / بارکد" autocomplete="off"><input id="scanQty" class="picker" type="number" min="1" value="1" placeholder="تعداد واقعی این بسته"></div>
+  <div class="row" style="margin-top:10px"><input id="scanCode" class="picker" placeholder="کد / بارکد اسکن‌شده یا ورود دستی" autocomplete="off"><input id="scanQty" class="picker" type="number" min="1" value="1" placeholder="تعداد واقعی این بسته"></div>
+  <button id="openBarcodeCamera" class="secondary" type="button" style="width:100%;margin-top:8px">📷 اسکن بارکد با دوربین گوشی</button>
+  <div id="barcodeScannerPanel" class="card hidden" style="padding:12px;margin-top:10px"><div id="barcodeReader" style="width:100%;max-width:100%;overflow:hidden"></div><div id="barcodeScannerStatus" class="status wait">در حال آماده‌سازی دوربین…</div><button id="stopBarcodeCamera" type="button" class="danger" style="width:100%;margin-top:8px">بستن دوربین</button></div>
   <button id="addScan" class="secondary" style="width:100%;margin-top:8px">➕ ثبت بسته اسکن‌شده</button>
   <div id="scanList" class="small" style="margin-top:10px">هنوز بسته‌ای ثبت نشده است.</div>
   <div class="actions"><button id="runFinalCheck" class="primary" style="margin-top:0">✅ مقایسه با فاکتور</button><button id="clearScans" class="secondary">پاک‌کردن اسکن‌ها</button></div>
@@ -541,5 +543,48 @@ $("scanQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault
 $("clearScans").onclick=()=>{packageScans=[];renderScans();$("finalCheckResults").innerHTML="";$("finalCheck").className="status wait";$("finalCheck").textContent="فهرست اسکن‌ها پاک شد.";};
 $("runFinalCheck").onclick=async()=>{try{if(!checkOrder)throw new Error("ابتدا فاکتور را بارگذاری کن.");if(!packageScans.length)throw new Error("هنوز بسته‌ای ثبت نشده است.");const d=await apiJson(`/api/orders/${encodeURIComponent(checkOrder.id)}/package-scans`,{method:"POST",body:JSON.stringify({scans:packageScans})});checkOrder=d.order;const fc=d.finalCheck;$("finalCheck").className="status "+(fc.ok?"ok":"err");$("finalCheck").textContent=fc.ok?"همه کدها و تعدادهای اسکن‌شده با فاکتور مطابقت دارند.":"مغایرت پیدا شد؛ ردیف‌های زیر را بررسی کن.";let rows=fc.results.map(x=>`<tr><td>${escapeHtml(x.code)}</td><td>${escapeHtml(x.name)}</td><td>${toFa(x.expectedQty)}</td><td>${toFa(x.scannedQty)}</td><td>${toFa(x.diff)}</td><td>${escapeHtml(x.status)}</td></tr>`);for(const x of fc.extras)rows.push(`<tr><td>${escapeHtml(x.code)}</td><td>—</td><td>۰</td><td>${toFa(x.scannedQty)}</td><td>${toFa(x.scannedQty)}</td><td>${escapeHtml(x.status)}</td></tr>`);$("finalCheckResults").innerHTML=`<table style="min-width:520px"><thead><tr><th>کد</th><th>نام کالا</th><th>فاکتور</th><th>اسکن‌شده</th><th>اختلاف</th><th>وضعیت</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;}catch(e){$("finalCheck").className="status err";$("finalCheck").textContent=e.message;}};
 </script>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+// Camera-based barcode scanning for Android/iOS browsers over HTTPS.
+let barcodeScannerInstance = null;
+const barcodePanel = document.getElementById('barcodeScannerPanel');
+const barcodeStatus = document.getElementById('barcodeScannerStatus');
+function barcodeMessage(msg, kind='wait') { barcodeStatus.className = 'status ' + kind; barcodeStatus.textContent = msg; }
+async function stopBarcodeCamera() {
+  if (barcodeScannerInstance) {
+    try { if (barcodeScannerInstance.isScanning) await barcodeScannerInstance.stop(); } catch (e) {}
+    try { await barcodeScannerInstance.clear(); } catch (e) {}
+    barcodeScannerInstance = null;
+  }
+  document.getElementById('barcodeReader').innerHTML = '';
+  barcodePanel.classList.add('hidden');
+}
+document.getElementById('openBarcodeCamera').addEventListener('click', async () => {
+  if (!window.isSecureContext) { alert('برای استفاده از دوربین، سایت باید با HTTPS باز شود.'); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { alert('مرورگر اجازه دسترسی به دوربین را نمی‌دهد. سایت را در Chrome باز کن و مجوز دوربین را فعال کن.'); return; }
+  if (typeof Html5Qrcode === 'undefined') { alert('کتابخانه اسکن بارکد بارگذاری نشد. اینترنت/VPN را بررسی کن یا کد را دستی وارد کن.'); return; }
+  barcodePanel.classList.remove('hidden');
+  barcodeMessage('برای شروع اسکن، اجازه دسترسی دوربین را بده.');
+  try {
+    barcodeScannerInstance = new Html5Qrcode('barcodeReader', { verbose: false });
+    const config = { fps: 10, qrbox: (w,h) => ({ width: Math.max(180, Math.min(300, w-30)), height: Math.max(100, Math.min(180, h-30)) }), aspectRatio: 1.777 };
+    await barcodeScannerInstance.start({ facingMode: 'environment' }, config, async (decodedText) => {
+      const field = document.getElementById('scanCode');
+      field.value = String(decodedText || '').trim();
+      barcodeMessage('بارکد خوانده شد. تعداد واقعی بسته را بررسی کن و سپس «ثبت بسته اسکن‌شده» را بزن.', 'ok');
+      try { if (barcodeScannerInstance && barcodeScannerInstance.isScanning) await barcodeScannerInstance.stop(); } catch(e) {}
+      field.focus();
+    }, () => {});
+    barcodeMessage('دوربین فعال است؛ بارکد را داخل کادر نگه دار.');
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    barcodeMessage('دوربین فعال نشد: ' + msg + ' — مجوز دوربین Chrome را بررسی کن.', 'err');
+  }
+});
+document.getElementById('stopBarcodeCamera').addEventListener('click', stopBarcodeCamera);
+window.addEventListener('pagehide', () => { try { if (barcodeScannerInstance && barcodeScannerInstance.isScanning) barcodeScannerInstance.stop(); } catch(e) {} });
+</script>
+
 </body>
 </html>
