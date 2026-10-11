@@ -164,22 +164,32 @@ function renderSelectedFile(f){if(!f){$("preview").classList.add("hidden");retur
 
 function normalizeExcelCode(s){return norm(s).replace(/[,،\s]/g,"")}
 $("importExcel").onclick=async()=>{
- const f=$("excelInvoice").files[0]; if(!f){setStatus("ابتدا فایل اکسل فاکتور را انتخاب کن.","err");return;}
+ const f=$("excelInvoice").files[0];
+ if(!f){setStatus("ابتدا فایل اکسل فاکتور را انتخاب کن.","err");return;}
  const btn=$("importExcel");btn.disabled=true;
+ // Clear prior invoice data first, so a failed import can never leave old rows/customer attached to a new invoice.
+ currentItems=[];renderItems(currentItems);$("customerName").value="";$("invoiceNo").value="";lastText="";
  try{
   setStatus("در حال خواندن مستقیم فایل اکسل؛ OCR اجرا نمی‌شود...","wait");
   const fd=new FormData();fd.append("file",f);
-  const r=await fetch("/api/import-invoice",{method:"POST",body:fd});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"خواندن اکسل ناموفق بود.");
-  if(d.invoiceNo && !$("invoiceNo").value)$("invoiceNo").value=norm(d.invoiceNo);
-  if(d.customerName){$("customerName").value=d.customerName;} else { setStatus("اقلام اکسل خوانده شد، اما نام مشتری در سربرگ به‌طور قطعی پیدا نشد؛ برای جلوگیری از ثبت مشتری اشتباه، نام را بررسی کن.","wait"); }
-  if(!$("invoiceNo").value)$("invoiceNo").value=f.name.replace(/\.(xls|xlsx|xlsm)$/i,"");
-  lastFile=f;lastText=`ورود مستقیم اکسل: ${f.name}\nبرگه: ${d.sheet}\nشماره فاکتور: ${d.invoiceNo||""}\nنام مشتری استخراج‌شده: ${d.customerName||"تشخیص داده نشد"}\nتعداد ردیف: ${d.items.length}\nجمع تعداد: ${d.totalQty}`;$("raw").textContent=lastText;
+  const r=await fetch("/api/import-invoice",{method:"POST",body:fd});
+  let d;try{d=await r.json();}catch(_){throw new Error("پاسخ سرور معتبر نیست؛ صفحه را تازه کن و دوباره امتحان کن.");}
+  if(!r.ok||!d.ok)throw new Error(d.error||"خواندن اکسل ناموفق بود.");
+  if(!Array.isArray(d.items)||!d.items.length)throw new Error("در فایل اکسل ردیف کالای معتبری پیدا نشد.");
+  // Excel is the structured source of truth: replace stale invoice/customer values every import.
+  if(d.invoiceNo)$("invoiceNo").value=norm(d.invoiceNo);
+  else $("invoiceNo").value=f.name.replace(/\.(xls|xlsx|xlsm)$/i,"");
+  $("customerName").value=d.customerName||"";
+  lastFile=f;lastText=`ورود مستقیم اکسل: ${f.name}\nبرگه: ${d.sheet||"-"}\nشماره فاکتور: ${d.invoiceNo||""}\nنام مشتری استخراج‌شده: ${d.customerName||"تشخیص داده نشد"}\nتعداد ردیف: ${d.items.length}\nجمع تعداد: ${d.totalQty}`;$("raw").textContent=lastText;
   currentItems=d.items.map((it,i)=>{const product=byCode.get(normalizeExcelCode(it.code));return {code:normalizeExcelCode(it.code),name:product?.name||it.name||"شرح در بانک پیدا نشد",qty:Number(it.qty),confidence:product?"high":"medium",source:product?"مستقیم از اکسل؛ کد در بانک پیدا شد":"مستقیم از اکسل؛ کد در بانک پیدا نشد",index:i,bankMatch:Boolean(product),invoiceName:it.name||""};});
   renderItems(currentItems);
   const missing=currentItems.filter(x=>!x.bankMatch).length;
-  setStatus(`اکسل خوانده شد: ${currentItems.length} ردیف، جمع تعداد ${toFa(d.totalQty)}. ${missing?`${toFa(missing)} کد در بانک پیدا نشد؛ بازبینی کن.`:"همه کدها در بانک محصولات پیدا شدند."}`,missing?"wait":"ok");
-  $("info").textContent=`فایل اکسل: ${f.name} | برگه: ${d.sheet} | تاریخ: ${d.invoiceDate||"در فایل تشخیص داده نشد"}`;
- }catch(e){setStatus("ورود اکسل انجام نشد: "+e.message,"err");}finally{btn.disabled=false;}
+  const declaredMismatch=d.totalMatchesDeclared===false;
+  const statusText=`اکسل خوانده شد: ${currentItems.length} ردیف، جمع تعداد ${toFa(d.totalQty)}. ${missing?`${toFa(missing)} کد در بانک پیدا نشد؛ بازبینی کن.`:"کدها با بانک محصولات تطبیق داده شدند."}${declaredMismatch?" هشدار: جمع ردیف‌ها با مقدار کل فاکتور برابر نیست.":""}${!d.customerName?" نام مشتری خودکار شناسایی نشد؛ قبل از ارسال، دستی وارد کن.":" نام مشتری هم استخراج شد."}`;
+  setStatus(statusText,(missing||declaredMismatch||!d.customerName)?"wait":"ok");
+  $("info").textContent=`فایل اکسل: ${f.name} | برگه: ${d.sheet||"-"} | تاریخ: ${d.invoiceDate||"در فایل تشخیص داده نشد"}`;
+ }catch(e){currentItems=[];renderItems(currentItems);setStatus("ورود اکسل انجام نشد: "+e.message,"err");}
+ finally{btn.disabled=false;}
 };
 
 
