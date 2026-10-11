@@ -27,7 +27,7 @@ app.post("/api/import-invoice", upload.single("file"), (req, res) => {
     const ext = path.extname(req.file.originalname || "").toLowerCase();
     if (![".xls", ".xlsx", ".xlsm"].includes(ext)) return res.status(400).json({ok:false,error:"فقط فایل اکسل XLS یا XLSX قابل قبول است."});
     const book = XLSX.read(req.file.buffer, {type:"buffer", cellDates:false});
-    let found = null, invoiceNo = "", invoiceDate = "";
+    let found = null, invoiceNo = "", invoiceDate = "", customerName = "";
     const norm = v => String(v ?? "").replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[يى]/g,"ی").replace(/ك/g,"ک").replace(/\u200c/g," ").replace(/\s+/g," ").trim().toLowerCase();
     const codeHeads = /^(کد کالا|کد محصول|کد|کد کالا یا خدمات|شناسه کالا|product code|item code)$|^کد کالا( یا)?$/;
     const nameHeads = /^(شرح کالا|نام کالا|شرح|شرح محصول|نام محصول|کالا|شرح کالا یا خدمات|توضیحات|description|item name|product)$|^شرح کالا( یا خدمات)?$/;
@@ -42,8 +42,24 @@ app.post("/api/import-invoice", upload.single("file"), (req, res) => {
       }
       if(found) break;
     }
-    // Also collect invoice metadata from label/value pairs.
-    for(const sn of book.SheetNames){const rows=XLSX.utils.sheet_to_json(book.Sheets[sn],{header:1,defval:"",raw:false});for(const row of rows.slice(0,15)){const line=row.map(v=>String(v??"")).join(" ");const m=line.match(/(?:شماره\s*فاکتور|شماره\s*سند)\s*[:：]?\s*([0-9۰-۹]+)/);if(m)invoiceNo=m[1];const d=line.match(/(?:تاریخ\s*فاکتور|تاریخ)\s*[:：]?\s*([0-9۰-۹]{4}[\/\-][0-9۰-۹]{1,2}[\/\-][0-9۰-۹]{1,2})/);if(d)invoiceDate=d[1];}}
+    // Extract invoice metadata and customer name from invoice header rows.
+    for(const sn of book.SheetNames){
+      const rows=XLSX.utils.sheet_to_json(book.Sheets[sn],{header:1,defval:"",raw:false});
+      for(const row of rows.slice(0,20)){
+        const vals=row.map(v=>String(v??"").trim()); const line=vals.join(" ");
+        const m=line.match(/(?:شماره\s*فاکتور|شماره\s*سند|شماره\s*[:：])\s*[:：]?\s*([0-9۰-۹]+)/);if(m)invoiceNo=m[1];
+        const d=line.match(/(?:تاریخ\s*فاکتور|تاریخ|تـاریخ)\s*[:：]?\s*([0-9۰-۹]{4}[\/\-][0-9۰-۹]{1,2}[\/\-][0-9۰-۹]{1,2})/);if(d)invoiceDate=d[1];
+        // Common Iranian invoice template: customer value often appears on the same row as "شماره اقتصادی" in the customer block.
+        if(!customerName && vals.some(v=>/جناب آقای|سرکار خانم|آقای\s|خانم\s|مشتری|خریدار/.test(v))){
+          const candidate=vals.find(v=>/^(جناب آقای|سرکار خانم|آقای|خانم|مشتری|خریدار)/.test(v));
+          if(candidate) customerName=candidate.replace(/\s+/g," ").trim();
+        }
+        if(!customerName){
+          const idx=vals.findIndex(v=>/نام\s*(?:مشتری|خریدار)|مشخصات\s*(?:مشتری|خریدار)/.test(norm(v)));
+          if(idx>=0){const candidate=vals.slice(idx+1).find(v=>v && !/^(کد|شماره|نشانی|تلفن|تاریخ)/.test(norm(v)));if(candidate)customerName=candidate;}
+        }
+      }
+    }
     if(!found) return res.status(422).json({ok:false,error:"سرستون‌های کد کالا، شرح کالا و مقدار در فایل پیدا نشد. لطفاً نمونه فایل را برای تنظیم قالب بفرست.",sheets:book.SheetNames});
     const items=[];
     for(const row of found.rows.slice(found.headerRow+1)){
@@ -56,7 +72,7 @@ app.post("/api/import-invoice", upload.single("file"), (req, res) => {
       items.push({code,name,qty});
     }
     if(!items.length) return res.status(422).json({ok:false,error:"سرستون پیدا شد، اما ردیف کالای معتبر استخراج نشد.",sheet:found.sheetName});
-    res.json({ok:true,invoiceNo,invoiceDate,sheet:found.sheetName,items,totalQty:items.reduce((a,x)=>a+x.qty,0),source:"excel"});
+    res.json({ok:true,invoiceNo,invoiceDate,customerName,sheet:found.sheetName,items,totalQty:items.reduce((a,x)=>a+x.qty,0),source:"excel"});
   } catch(e) { console.error("Excel import failed",e); res.status(400).json({ok:false,error:"خواندن فایل اکسل ناموفق بود: "+e.message}); }
 });
 
@@ -67,7 +83,7 @@ app.post("/api/orders", (req,res)=>{
     if(!picker || !invoiceNo || !Array.isArray(items) || !items.length) return res.status(400).json({ok:false,error:"شماره فاکتور، نام جمع‌آور و اقلام فاکتور الزامی است."});
     const id=String(invoiceNo).trim();
     if(ORDERS.has(id)) return res.status(409).json({ok:false,error:"برای این شماره فاکتور قبلاً مأموریت ساخته شده است."});
-    const order={id,picker,customerName:String(customerName||"").trim(),invoiceNo:id,invoiceName:invoiceName||"",items:items.map((x,i)=>({index:i,code:String(x.code||""),name:String(x.name||""),expectedQty:Number(x.qty)||0,actualQty:0,checked:false,issue:""})),status:"assigned",createdAt:new Date().toISOString()};
+    const order={id,picker,customerName:String(customerName||"").trim(),invoiceNo:id,invoiceName:invoiceName||"",items:items.map((x,i)=>({index:i,code:String(x.code||""),name:String(x.name||""),expectedQty:Number(x.qty)||0,actualQty:0,checked:false,issue:""})),packageScans:[],status:"assigned",createdAt:new Date().toISOString()};
     ORDERS.set(id,order);
     res.json({ok:true,order});
   } catch(e){res.status(500).json({ok:false,error:e.message});}
@@ -84,6 +100,18 @@ app.patch("/api/orders/:id",(req,res)=>{
   incoming.forEach(x=>{ const i=Number(x.index); if(o.items[i]){o.items[i].actualQty=Math.max(0,Number(x.actualQty)||0);o.items[i].checked=Boolean(x.checked);o.items[i].issue=o.items[i].actualQty===o.items[i].expectedQty?"":(o.items[i].actualQty<o.items[i].expectedQty?"کسری":"اضافی");}});
   o.status=req.body?.status||o.status; o.updatedAt=new Date().toISOString();
   res.json({ok:true,order:o});
+});
+
+app.post("/api/orders/:id/package-scans", (req,res)=>{
+  const o=ORDERS.get(String(req.params.id||"").toUpperCase());
+  if(!o) return res.status(404).json({ok:false,error:"ماموریت پیدا نشد یا سرور از نو راه‌اندازی شده است."});
+  const scans=Array.isArray(req.body?.scans)?req.body.scans:[];
+  o.packageScans=scans.map(s=>({code:String(s.code||"").trim(),qty:Math.max(0,Number(s.qty)||0),label:String(s.label||"")})).filter(s=>s.code&&s.qty>0);
+  const sums=new Map(); for(const s of o.packageScans)sums.set(s.code,(sums.get(s.code)||0)+s.qty);
+  const results=o.items.map(it=>{const actual=sums.get(it.code)||0;return {code:it.code,name:it.name,expectedQty:it.expectedQty,scannedQty:actual,diff:actual-it.expectedQty,status:actual===it.expectedQty?"مطابق":actual<it.expectedQty?"کسری":"اضافی"};});
+  const extras=[...sums.entries()].filter(([code])=>!o.items.some(it=>it.code===code)).map(([code,qty])=>({code,scannedQty:qty,status:"کالای خارج از فاکتور"}));
+  o.finalCheck={results,extras,checkedAt:new Date().toISOString(),ok:results.every(x=>x.diff===0)&&extras.length===0};
+  res.json({ok:true,order:o,finalCheck:o.finalCheck});
 });
 
 app.get("/health", (req, res) => {

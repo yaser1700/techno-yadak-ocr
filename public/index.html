@@ -51,7 +51,7 @@ input,button,select,textarea{max-width:100%;min-width:0}
 <div class="card">
   <h2>۲) مشخصات و عکس فاکتور</h2>
   <input id="invoiceNo" class="picker" inputmode="numeric" placeholder="شماره فاکتور" style="margin-bottom:10px">
-  <input id="customerName" class="picker" placeholder="نام مشتری / فروشگاه" style="margin-bottom:10px">
+  <input id="customerName" class="picker" placeholder="نام مشتری / فروشگاه (از اکسل خودکار پر می‌شود)" style="margin-bottom:10px">
   <div class="row"><input id="invoice" type="file" accept="image/*,.pdf,application/pdf"><input id="camera" type="file" accept="image/*" capture="environment" style="display:none"><button id="cameraBtn" type="button" class="secondary">📷 عکس با دوربین</button></div><div class="small" style="margin-top:8px">برای عکس یا PDF از OCR استفاده کن؛ اگر فاکتور اکسل است، آن را از بخش زیر وارد کن تا تعدادها مستقیم از فایل خوانده شوند.</div><div class="card" style="background:#f7f9ff;margin-top:12px;padding:12px"><b>📊 ورود مستقیم فاکتور اکسل</b><input id="excelInvoice" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="margin-top:10px"><button id="importExcel" type="button" class="secondary" style="width:100%;margin-top:8px">📥 استخراج اقلام از اکسل (بدون OCR)</button><div class="small">فایل XLS و XLSX پشتیبانی می‌شود. قبل از ارسال سفارش، نتیجه را بازبینی کن.</div></div>
   <img id="preview" class="preview hidden" alt="پیش‌نمایش فاکتور">
   <button id="go" class="primary">📷 خواندن و استخراج اقلام فاکتور</button>
@@ -86,10 +86,17 @@ input,button,select,textarea{max-width:100%;min-width:0}
   <button id="submitWorker" class="primary hidden">✅ ثبت جمع‌آوری و ارسال برای کنترل</button>
 </div>
 
-<div class="card">
-  <h2>🔎 کنترل نهایی</h2>
-  <div class="muted">در مرحله کنترل، مقدار فاکتور با مقدار واقعی جمع‌آوری‌شده مقایسه می‌شود. کسری، اضافی و کالای اشتباه باید جداگانه مشخص شوند.</div>
-  <div id="finalCheck" class="status wait">پس از ثبت جمع‌آوری، نتیجه کنترل اینجا نمایش داده می‌شود.</div>
+<div class="card" id="finalCheckCard">
+  <h2>🔎 کنترل نهایی بسته‌ها</h2>
+  <div class="muted">شماره فاکتور را وارد کن، سپس بارکد یا کد روی بسته را اسکن/وارد کن و تعداد واقعی همان بسته را ثبت کن. اگر لیبل تعداد داخل بسته دارد، آن مقدار را وارد کن؛ تعداد بسته از بانک کالا حدس زده نمی‌شود.</div>
+  <div class="row" style="margin-top:10px"><input id="checkOrderCode" class="picker" placeholder="شماره فاکتور / مأموریت"><button id="loadCheckOrder" class="secondary">📥 بارگذاری فاکتور</button></div>
+  <div id="checkOrderMeta" class="status wait hidden"></div>
+  <div class="row" style="margin-top:10px"><input id="scanCode" class="picker" placeholder="اسکن یا ورود کد / بارکد" autocomplete="off"><input id="scanQty" class="picker" type="number" min="1" value="1" placeholder="تعداد واقعی این بسته"></div>
+  <button id="addScan" class="secondary" style="width:100%;margin-top:8px">➕ ثبت بسته اسکن‌شده</button>
+  <div id="scanList" class="small" style="margin-top:10px">هنوز بسته‌ای ثبت نشده است.</div>
+  <div class="actions"><button id="runFinalCheck" class="primary" style="margin-top:0">✅ مقایسه با فاکتور</button><button id="clearScans" class="secondary">پاک‌کردن اسکن‌ها</button></div>
+  <div id="finalCheck" class="status wait">پس از بارگذاری فاکتور و ثبت بسته‌ها، نتیجه کنترل اینجا نمایش داده می‌شود.</div>
+  <div id="finalCheckResults" class="tableWrap"></div>
 </div>
 
 <div class="card">
@@ -137,8 +144,9 @@ $("importExcel").onclick=async()=>{
   const fd=new FormData();fd.append("file",f);
   const r=await fetch("/api/import-invoice",{method:"POST",body:fd});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"خواندن اکسل ناموفق بود.");
   if(d.invoiceNo && !$("invoiceNo").value)$("invoiceNo").value=norm(d.invoiceNo);
+  if(d.customerName){$("customerName").value=d.customerName;}
   if(!$("invoiceNo").value)$("invoiceNo").value=f.name.replace(/\.(xls|xlsx|xlsm)$/i,"");
-  lastFile=f;lastText=`ورود مستقیم اکسل: ${f.name}\nبرگه: ${d.sheet}\nتعداد ردیف: ${d.items.length}\nجمع تعداد: ${d.totalQty}`;$("raw").textContent=lastText;
+  lastFile=f;lastText=`ورود مستقیم اکسل: ${f.name}\nبرگه: ${d.sheet}\nشماره فاکتور: ${d.invoiceNo||""}\nنام مشتری استخراج‌شده: ${d.customerName||"تشخیص داده نشد"}\nتعداد ردیف: ${d.items.length}\nجمع تعداد: ${d.totalQty}`;$("raw").textContent=lastText;
   currentItems=d.items.map((it,i)=>{const product=byCode.get(normalizeExcelCode(it.code));return {code:normalizeExcelCode(it.code),name:product?.name||it.name||"شرح در بانک پیدا نشد",qty:Number(it.qty),confidence:product?"high":"medium",source:product?"مستقیم از اکسل؛ کد در بانک پیدا شد":"مستقیم از اکسل؛ کد در بانک پیدا نشد",index:i,bankMatch:Boolean(product),invoiceName:it.name||""};});
   renderItems(currentItems);
   const missing=currentItems.filter(x=>!x.bankMatch).length;
@@ -518,6 +526,20 @@ let workerOrder=null;
 $('loadOrder').onclick=async()=>{try{const id=$('orderCode').value.trim().toUpperCase();if(!id)throw new Error('شماره فاکتور را وارد کن.');const d=await apiJson('/api/orders/'+encodeURIComponent(id));workerOrder=d.order;renderWorkerOrder(workerOrder);$('workerStatus').className='status ok';$('workerStatus').textContent=`ماموریت ${workerOrder.id} — مشتری: ${workerOrder.customerName||'ثبت نشده'} — جمع‌آور: ${workerOrder.picker}`;$('workerStatus').classList.remove('hidden');}catch(e){$('workerStatus').className='status err';$('workerStatus').textContent=e.message;$('workerStatus').classList.remove('hidden')}};
 $('submitWorker').onclick=async()=>{if(!workerOrder)return;const items=workerOrder.items.map(x=>{const q=document.querySelector(`.workerQty[data-i="${x.index}"]`);const c=document.querySelector(`.workerCheck[data-i="${x.index}"]`);return {...x,actualQty:Number(q?.value)||0,checked:Boolean(c?.checked)}});try{const d=await apiJson('/api/orders/'+workerOrder.id,{method:'PATCH',body:JSON.stringify({items,status:'collected'})});workerOrder=d.order;const issues=workerOrder.items.filter(x=>x.actualQty!==x.expectedQty);$('finalCheck').className='status '+(issues.length?'err':'ok');$('finalCheck').textContent=issues.length?`⚠️ ${toFa(issues.length)} ردیف نیازمند بررسی است: ${issues.map(x=>`کد ${x.code} (${x.issue})`).join('، ')}`:'✅ همه اقلام طبق فاکتور جمع‌آوری شده‌اند.';}catch(e){alert(e.message)}};
 $('assignOrder').onclick=async()=>{try{if(!currentItems.length)throw new Error('ابتدا فاکتور را بخوان.');if(currentItems.some(x=>x.qty==null||!Number.isFinite(Number(x.qty))||Number(x.qty)<1))throw new Error('تعداد یک یا چند ردیف مشخص نیست. ابتدا تعدادها را از روی فاکتور اصلاح کن.');const picker=$('picker').value.trim();if(!picker)throw new Error('نام جمع‌آور را انتخاب کن.'); if(!$("invoiceNo").value.trim())throw new Error('شماره فاکتور را وارد یا اصلاح کن.');const d=await apiJson('/api/orders',{method:'POST',body:JSON.stringify({picker,customerName:$("customerName").value.trim(),items:currentItems,invoiceNo:$("invoiceNo").value.trim(),invoiceName:lastFile?.name||''})});alert(`ماموریت ساخته شد.\nشماره فاکتور: ${d.order.id}\nاین کد را برای ${picker} بفرست.`);}catch(e){alert(e.message)}};
+
+// Final package-check workflow. Package quantities are entered per scanned label, never inferred from product master.
+let checkOrder=null, packageScans=[];
+function renderScans(){
+ const el=$("scanList"); if(!packageScans.length){el.textContent="هنوز بسته‌ای ثبت نشده است.";return;}
+ el.innerHTML=packageScans.map((s,i)=>`<div class="card" style="padding:10px;margin:6px 0"><b>${escapeHtml(s.code)}</b> — تعداد: ${toFa(s.qty)} <button class="danger" data-remove-scan="${i}" style="padding:5px 9px;font-size:12px">حذف</button></div>`).join("");
+ el.querySelectorAll("[data-remove-scan]").forEach(b=>b.onclick=()=>{packageScans.splice(Number(b.dataset.removeScan),1);renderScans();});
+}
+$("loadCheckOrder").onclick=async()=>{try{const id=$("checkOrderCode").value.trim();if(!id)throw new Error("شماره فاکتور را وارد کن.");const d=await apiJson("/api/orders/"+encodeURIComponent(id));checkOrder=d.order;packageScans=Array.isArray(checkOrder.packageScans)?checkOrder.packageScans:[];$("checkOrderMeta").className="status ok";$("checkOrderMeta").textContent=`فاکتور ${checkOrder.id} — مشتری: ${checkOrder.customerName||"ثبت نشده"} — جمع‌آور: ${checkOrder.picker}`;renderScans();$("finalCheckResults").innerHTML="";$("finalCheck").className="status wait";$("finalCheck").textContent="فاکتور بارگذاری شد؛ بسته‌ها را اسکن کن.";}catch(e){$("checkOrderMeta").className="status err";$("checkOrderMeta").textContent=e.message;$("checkOrderMeta").classList.remove("hidden");}};
+$("addScan").onclick=()=>{const code=norm($("scanCode").value).replace(/\s/g,"");const qty=Number($("scanQty").value);if(!checkOrder){alert("ابتدا فاکتور را بارگذاری کن.");return;}if(!code){alert("کد یا بارکد را اسکن کن.");return;}if(!Number.isFinite(qty)||qty<1){alert("تعداد واقعی باید حداقل ۱ باشد.");return;}packageScans.push({code,qty});$("scanCode").value="";$("scanQty").value="1";renderScans();$("scanCode").focus();};
+$("scanCode").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("scanQty").focus();}});
+$("scanQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("addScan").click();}});
+$("clearScans").onclick=()=>{packageScans=[];renderScans();$("finalCheckResults").innerHTML="";$("finalCheck").className="status wait";$("finalCheck").textContent="فهرست اسکن‌ها پاک شد.";};
+$("runFinalCheck").onclick=async()=>{try{if(!checkOrder)throw new Error("ابتدا فاکتور را بارگذاری کن.");if(!packageScans.length)throw new Error("هنوز بسته‌ای ثبت نشده است.");const d=await apiJson(`/api/orders/${encodeURIComponent(checkOrder.id)}/package-scans`,{method:"POST",body:JSON.stringify({scans:packageScans})});checkOrder=d.order;const fc=d.finalCheck;$("finalCheck").className="status "+(fc.ok?"ok":"err");$("finalCheck").textContent=fc.ok?"همه کدها و تعدادهای اسکن‌شده با فاکتور مطابقت دارند.":"مغایرت پیدا شد؛ ردیف‌های زیر را بررسی کن.";let rows=fc.results.map(x=>`<tr><td>${escapeHtml(x.code)}</td><td>${escapeHtml(x.name)}</td><td>${toFa(x.expectedQty)}</td><td>${toFa(x.scannedQty)}</td><td>${toFa(x.diff)}</td><td>${escapeHtml(x.status)}</td></tr>`);for(const x of fc.extras)rows.push(`<tr><td>${escapeHtml(x.code)}</td><td>—</td><td>۰</td><td>${toFa(x.scannedQty)}</td><td>${toFa(x.scannedQty)}</td><td>${escapeHtml(x.status)}</td></tr>`);$("finalCheckResults").innerHTML=`<table style="min-width:520px"><thead><tr><th>کد</th><th>نام کالا</th><th>فاکتور</th><th>اسکن‌شده</th><th>اختلاف</th><th>وضعیت</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;}catch(e){$("finalCheck").className="status err";$("finalCheck").textContent=e.message;}};
 </script>
 </body>
 </html>
