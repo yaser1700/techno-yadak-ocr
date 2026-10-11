@@ -74,7 +74,7 @@ app.post("/api/orders/:id/package-scans", (req,res)=>{
 });
 
 app.get("/health", (req, res) => {
-  res.status(200).json({ ok: true, service: "techno-yadak-ocr", port: PORT, ocrKeyConfigured: Boolean(OCR_API_KEY) });
+  res.status(200).json({ ok: true, service: "techno-yadak-ocr", version: "36", port: PORT, ocrKeyConfigured: Boolean(OCR_API_KEY) });
 });
 
 function safeProviderSummary(data) {
@@ -89,9 +89,11 @@ function safeProviderSummary(data) {
   };
 }
 
-async function requestOcrProvider(file, engine, isLabel) {
+async function requestOcrProvider(file, engine, isLabel, language) {
   const form = new FormData();
-  form.append("language", "per");
+  // Engine 3 supports 200+ languages and mixed-script labels. Engine 2 is Latin/Chinese focused,
+  // so it is used only as an optional English fallback, never for Persian labels.
+  form.append("language", language || (isLabel ? "auto" : "per"));
   form.append("OCREngine", String(engine));
   form.append("isTable", isLabel ? "false" : "true");
   form.append("detectOrientation", "true");
@@ -127,16 +129,16 @@ app.post("/api/ocr", upload.single("file"), async (req, res) => {
     if (!req.file?.buffer?.length) return res.status(400).json({ ok:false, error:"فایل تصویر دریافت نشد.", debugCode:"NO_FILE" });
     if (req.file.size > 10 * 1024 * 1024) return res.status(413).json({ ok:false, error:"حجم فایل بیشتر از ۱۰ مگابایت است.", debugCode:"FILE_OVER_10MB", bytes:req.file.size });
 
-    const isLabel = String(req.body?.mode || "") === "label";
-    let result = await requestOcrProvider(req.file, isLabel ? 2 : 3, isLabel);
-    let fallbackUsed = false;
-    // Label text is small; if Engine 2 returns no text, retry once with Engine 1.
-    // Do not retry authentication, quota, or HTTP failures because those will not improve by changing engines.
-    if (isLabel && result.response.ok && !result.parseError && !result.text && !/quota|apikey|api key|credits|limit/i.test(providerErrorText(result.data))) {
-      console.warn("[OCR] label engine 2 returned no text; retrying with engine 1");
-      result = await requestOcrProvider(req.file, 1, true);
-      fallbackUsed = true;
-    }
+    const requestMode = String(req.body?.mode || "");
+    const isLabel = requestMode === "label" || requestMode === "label-latin";
+    const isLatinFallback = requestMode === "label-latin";
+    // Persian/mixed-language labels: Engine 3 with automatic language detection.
+    // Optional second pass: Engine 2 in English mode for labels like "100 Stück/PCS".
+    // Never choose Engine 2 with Persian as the declared language.
+    const selectedEngine = isLatinFallback ? 2 : 3;
+    const selectedLanguage = isLatinFallback ? "eng" : (isLabel ? "auto" : "per");
+    const result = await requestOcrProvider(req.file, selectedEngine, isLabel, selectedLanguage);
+    const fallbackUsed = isLatinFallback;
 
     console.log("[OCR] provider HTTP status", result.response.status, "engine", result.engine, "fallback", fallbackUsed);
     console.log("[OCR] provider raw response", String(result.raw || "").slice(0, 4000));

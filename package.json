@@ -1,6 +1,6 @@
 {
   "name": "techno-yadak-ocr",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "private": true,
   "engines": {
     "node": ">=18"
@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node server.js",
     "test:excel": "node tests/test-import.js",
-    "test": "node tests/test-import.js && node tests/test-import-real-layout.js"
+    "test": "node tests/test-import.js && node tests/test-import-real-layout.js && node tests/test-import-real-file.js"
   },
   "dependencies": {
     "express": "^4.21.2",

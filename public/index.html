@@ -117,6 +117,11 @@ input,button,select,textarea{max-width:100%;min-width:0}
     <details id="labelRawDetails" class="hidden" style="margin-top:8px"><summary>متن خام خوانده‌شده از لیبل</summary><pre id="labelRawText" style="white-space:pre-wrap;line-height:1.8;background:#fff;border-radius:8px;padding:10px;max-height:220px;overflow:auto"></pre></details>
   </div>
   <div id="barcodeScannerPanel" class="card hidden" style="padding:12px;margin-top:10px"><div id="barcodeReader" style="width:100%;max-width:100%;overflow:hidden"></div><div id="barcodeScannerStatus" class="status wait">در حال آماده‌سازی دوربین…</div><button id="stopBarcodeCamera" type="button" class="danger" style="width:100%;margin-top:8px">بستن دوربین</button></div>
+  <details style="margin-top:10px"><summary>اتصال بارکد به کد کالا (فقط یک‌بار برای هر نوع لیبل)</summary>
+    <div class="small" style="margin:8px 0">اگر بارکد مثلاً TS193 است و با کد کالا در بانک فرق دارد، بارکد را به کد کالای بانک وصل کن. این نگاشت روی همین دستگاه ذخیره می‌شود.</div>
+    <div class="row"><input id="mapBarcodeValue" class="picker" placeholder="بارکد خام، مثلاً TS193"><input id="mapProductCode" class="picker" placeholder="کد کالا در بانک"></div>
+    <button id="saveBarcodeMap" class="secondary" type="button" style="width:100%;margin-top:8px">ذخیره اتصال بارکد</button><div id="barcodeMapStatus" class="small"></div>
+  </details>
   <button id="addScan" class="secondary" style="width:100%;margin-top:8px">➕ ثبت بسته اسکن‌شده</button>
   <div id="scanList" class="small" style="margin-top:10px">هنوز بسته‌ای ثبت نشده است.</div>
   <div class="actions"><button id="runFinalCheck" class="primary" style="margin-top:0">✅ مقایسه با فاکتور</button><button id="clearScans" class="secondary">پاک‌کردن اسکن‌ها</button></div>
@@ -381,7 +386,7 @@ function findInvoiceProductRows(text, overlayLines){
      if(byCode.has(code) && next && !/^\d/.test(next.s) && !/(جمع|مبلغ|بهای|تخفیف|مالیات|توضیحات|تاریخ|شماره)/.test(next.s)) add(code,line);
    }
  }
- const overlay=(overlayLines||[]).flatMap((line,li)=>(line.words||[]).map(w=>({t:digits(w.text||'').replace(/[^0-9]/g,''),x:Number(w.left)||0,y:(Number(w.top)||0)+(Number(w.height)||0)/2,h:Number(w.height)||12,li}))).filter(w=>w.t);
+ const overlay=(overlayLines||[]).flatMap((line,li)=>(line.words||[]).map(w=>({text:norm(w.text||''),t:digits(w.text||'').replace(/[^0-9]/g,''),x:Number(w.left)||0,width:Number(w.width)||0,y:(Number(w.top)||0)+(Number(w.height)||0)/2,h:Number(w.height)||12,li}))).filter(w=>w.text);
  const maxX=Math.max(1,...overlay.map(w=>w.x));
  const geoCodes=[];
  for(const w of overlay){
@@ -399,26 +404,47 @@ function findInvoiceProductRows(text, overlayLines){
 }
 function readInvoiceTotalQuantity(text){
  const lines=String(text||'').split(/\r?\n/).map(norm);
- for(let i=0;i<lines.length;i++){
-   if(/مقدار\s*کل/.test(lines[i])){
-     for(let j=i;j<Math.min(lines.length,i+5);j++){
-       const s=digits(lines[j]);
-       if(j>i && /جمع\s*کل|توضیحات|مالیات|تخفیف/.test(s)) break;
-       const m=s.match(/(?:^|\D)(\d{1,4})(?:\D|$)/);
-       if(m){const n=Number(m[1]);if(n>0&&n<=9999)return n;}
-     }
+ // Use the last «مقدار کل» occurrence: the first one is often the item-table header,
+ // while the last occurrence is the printed invoice summary.
+ const anchors=[];
+ for(let i=0;i<lines.length;i++) if(/مقدار\s*کل/.test(lines[i]) && !/کد\s*کالا/.test(lines[i])) anchors.push(i);
+ for(const i of anchors.reverse()){
+   const range=[i,i-1,i+1,i+2,i+3,i+4].filter(j=>j>=0&&j<lines.length);
+   for(const j of range){
+     const line=digits(lines[j]);
+     // Do not treat prices or dates as a total item quantity.
+     if(/\d{1,3}(?:,\d{3}){2,}/.test(line) || /بهای|مبلغ|تخفیف|مالیات|تاریخ/.test(line)) continue;
+     const m=line.match(/(?:^|[^0-9])(\d{1,4})(?:[^0-9]|$)/);
+     if(m){const n=Number(m[1]);if(n>0&&n<=9999)return n;}
    }
  }
  return null;
 }
 function quantitiesFromOverlay(rows, overlay, maxX){
  if(!rows.length || !overlay.length) return [];
- const qtyWords=overlay.filter(w=>w.x/maxX>=.38 && w.x/maxX<=.64 && /^\d{1,3}$/.test(w.t)).map(w=>({...w,n:Number(w.t)})).filter(w=>w.n>=1&&w.n<=999);
+ const rowYs=rows.map(r=>r.y).filter(Number.isFinite);
+ const firstY=rowYs.length?Math.min(...rowYs):Infinity;
+ // Prefer the actual x-position of the «مقدار/تعداد» table header rather than a fixed screen ratio.
+ const headerWords=overlay.filter(w=>/(?:مقدار|تعداد|qty|quantity)/i.test(w.text||'') && Number.isFinite(w.x) && w.y<firstY && firstY-w.y<260);
+ let qtyCenter=null, qtyTolerance=48;
+ if(headerWords.length){
+   const closest=headerWords.sort((a,b)=>Math.abs(firstY-a.y)-Math.abs(firstY-b.y))[0];
+   qtyCenter=closest.x+Math.max(0,closest.width||0)/2;
+   qtyTolerance=Math.max(32,Math.min(75,(closest.width||22)*2.2));
+ }
+ const numericWords=overlay.filter(w=>/^\d{1,3}$/.test(w.t)).map(w=>({...w,n:Number(w.t)})).filter(w=>w.n>=1&&w.n<=999);
  return rows.map(row=>{
    if(!Number.isFinite(row.y)) return null;
-   const candidates=qtyWords.map(w=>({...w,dy:Math.abs(w.y-row.y)})).filter(w=>w.dy<=Math.max(13,(w.h||12)*1.15)).sort((a,b)=>a.dy-b.dy);
+   let candidates=numericWords.filter(w=>Math.abs(w.y-row.y)<=Math.max(14,(w.h||12)*1.25));
+   if(qtyCenter!==null){
+     const inColumn=candidates.filter(w=>Math.abs((w.x+(w.width||0)/2)-qtyCenter)<=qtyTolerance);
+     if(inColumn.length) candidates=inColumn;
+   }else{
+     candidates=candidates.filter(w=>w.x/maxX>=.34&&w.x/maxX<=.68);
+   }
+   candidates.sort((a,b)=>Math.abs(a.y-row.y)-Math.abs(b.y-row.y));
    if(!candidates.length) return null;
-   if(candidates.length>1 && Math.abs(candidates[0].dy-candidates[1].dy)<2 && candidates[0].n!==candidates[1].n) return null;
+   if(candidates.length>1 && Math.abs(candidates[0].y-candidates[1].y)<2 && candidates[0].n!==candidates[1].n) return null;
    return candidates[0].n;
  });
 }
@@ -461,11 +487,24 @@ function extractTable(overlay){
 
 function extractInvoiceNumber(text){
  const lines=String(text||"").split(/\r?\n/).map(x=>norm(x)).filter(Boolean);
- for(const line of lines){
-   if(/شماره/.test(line) && !/(اقتصادی|حساب|کارت|تماس|تلفن|پستی|شبا)/.test(line)){
-     const m=line.match(/شماره\s*[:：-]?\s*([0-9]{3,10})/);
-     if(m) return m[1];
+ const bad=/(اقتصادی|حساب|کارت|تماس|تلفن|پستی|شبا|موبایل|همراه|تاریخ)/;
+ const tableStart=lines.findIndex(line=>/کد\s*کالا|شرح\s*کالا|ردیف/.test(line));
+ const header=lines.slice(0,tableStart>=0?tableStart:Math.min(lines.length,45));
+ for(let i=0;i<header.length;i++){
+   if(!/شماره/.test(header[i])||bad.test(header[i])) continue;
+   const same=header[i].match(/شماره\s*(?:فاکتور)?\s*[:：-]?\s*([0-9]{3,10})/);
+   if(same) return same[1];
+   // OCR frequently emits the invoice number and the word «شماره» on separate lines.
+   for(const j of [i-1,i+1,i-2,i+2]){
+     if(j<0||j>=header.length) continue;
+     const candidate=digits(header[j]).replace(/[,، ]/g,'');
+     if(/^\d{3,10}$/.test(candidate) && !/^14\d{2}0?\d/.test(candidate)) return candidate;
    }
+ }
+ // Last safe fallback: only a standalone number immediately adjacent to an explicit invoice-number label.
+ for(let i=0;i<header.length;i++){
+   if(!/شماره\s*(?:فاکتور)?\s*[:：-]?$/.test(header[i])||bad.test(header[i])) continue;
+   for(const j of [i-1,i+1]) if(j>=0&&j<header.length){const n=digits(header[j]).replace(/\D/g,'');if(/^\d{3,10}$/.test(n))return n;}
  }
  return "";
 }
@@ -543,7 +582,8 @@ function parsePackageQuantityFromOCR(text){
  const patterns=[
    /(?:تعداد\s*(?:(?:داخل|در)\s*بسته)?|تعداد\s*بسته|مقدار\s*بسته|qty(?:\s*(?:per|\/)?\s*pack)?|quantity|pack\s*(?:qty|size)|pcs?\s*(?:per|\/)\s*pack)\s*[:=#\-]?\s*(?:عدد|pcs?\s*)?(\d{1,4})/i,
    /(?:بسته|کارتن)\s*(?:شامل|دارای|تعداد)?\s*[:=#\-]?\s*(\d{1,4})\s*(?:عدد|قطعه|pcs?|pieces?)?/i,
-   /(?:^|[^\d])(\d{1,4})\s*(?:عدد|قطعه|pcs?|pieces?|units?|pc\.?|عددی)(?=$|[^a-z])/i,
+   // Common import labels: “100 Stück/PCS”, “100 STUCK PCS”, “100 Stk.”
+   /(?:^|[^\d])(\d{1,4})\s*(?:stück|stuck|stk\.?|pcs?\s*\/\s*pcs?|pcs?|pieces?|units?|pc\.?|عددی|عدد|قطعه)(?=$|[^a-z])/i,
    /(?:^|[^\d])(\d{1,4})\s*(?:عدد|قطعه)\s*(?:در|داخل)\s*بسته/i,
    /(?:pack|carton|ctn)\s*[:=#\-]?\s*(\d{1,4})/i
  ];
@@ -600,7 +640,7 @@ async function runOCR(file){
  const r=await fetch('/api/ocr',{method:'POST',body:fd});
  const d=await r.json().catch(()=>({ok:false,error:'پاسخ سرور قابل خواندن نیست.'}));
  if(!r.ok||!d.ok){throw new Error(d.error||'OCR ناموفق بود.');}
- $("bar").style.width='80%';lastText=d.text||'';$("raw").textContent=lastText||'(متن خالی)'; const detectedInvoice=extractInvoiceNumber(lastText); if(detectedInvoice && !$("invoiceNo").value) $("invoiceNo").value=detectedInvoice;
+ $("bar").style.width='80%';lastText=d.text||'';$("raw").textContent=lastText||'(متن خالی)'; const detectedInvoice=extractInvoiceNumber(lastText); if(detectedInvoice) $("invoiceNo").value=detectedInvoice;
  const detectedCustomer=extractCustomerNameFromOCR(lastText);
  if(detectedCustomer) $("customerName").value=detectedCustomer;
  const items=extractItemsFromText(lastText,d.overlayLines);$("bar").style.width='100%';
@@ -676,7 +716,10 @@ function renderScans(){
  el.querySelectorAll("[data-remove-scan]").forEach(b=>b.onclick=()=>{packageScans.splice(Number(b.dataset.removeScan),1);renderScans();});
 }
 $("loadCheckOrder").onclick=async()=>{try{const id=$("checkOrderCode").value.trim();if(!id)throw new Error("شماره فاکتور را وارد کن.");const d=await apiJson("/api/orders/"+encodeURIComponent(id));checkOrder=d.order;packageScans=Array.isArray(checkOrder.packageScans)?checkOrder.packageScans:[];$("checkOrderMeta").className="status ok";$("checkOrderMeta").textContent=`فاکتور ${checkOrder.id} — مشتری: ${checkOrder.customerName||"ثبت نشده"} — جمع‌آور: ${checkOrder.picker}`;renderScans();$("finalCheckResults").innerHTML="";$("finalCheck").className="status wait";$("finalCheck").textContent="فاکتور بارگذاری شد؛ بسته‌ها را اسکن کن.";}catch(e){$("checkOrderMeta").className="status err";$("checkOrderMeta").textContent=e.message;$("checkOrderMeta").classList.remove("hidden");}};
-$("addScan").onclick=()=>{const code=norm($("scanCode").value).replace(/\s/g,"");const qty=Number($("scanQty").value);if(!checkOrder){alert("ابتدا فاکتور را بارگذاری کن.");return;}if(!code){alert("کد یا بارکد را اسکن کن.");return;}if(!Number.isFinite(qty)||qty<1){alert("تعداد واقعی باید حداقل ۱ باشد.");return;}packageScans.push({code,qty});$("scanCode").value="";$("scanQty").value="";renderScans();$("scanCode").focus();};
+function getBarcodeMap(){try{return JSON.parse(localStorage.getItem("techno_barcode_map")||"{}")}catch(_){return {}}}
+function resolveBarcode(raw){const v=norm(raw).replace(/\s/g,"");const map=getBarcodeMap();return String(map[v]||v)}
+$("saveBarcodeMap").onclick=()=>{const raw=norm($("mapBarcodeValue").value).replace(/\s/g,"");const code=norm($("mapProductCode").value).replace(/\s/g,"");const product=byCode.get(code);if(!raw){$("barcodeMapStatus").textContent="ابتدا بارکد خام را وارد یا اسکن کن.";return;}if(!product){$("barcodeMapStatus").textContent="کد کالا در بانک محصولات پیدا نشد.";return;}const map=getBarcodeMap();map[raw]=code;localStorage.setItem("techno_barcode_map",JSON.stringify(map));$("barcodeMapStatus").textContent=`بارکد ${raw} به کد کالا ${code} وصل شد و روی همین دستگاه ذخیره شد.`;};
+$("addScan").onclick=()=>{const raw=norm($("scanCode").value).replace(/\s/g,"");const code=resolveBarcode(raw);const qty=Number($("scanQty").value);if(!checkOrder){alert("ابتدا فاکتور را بارگذاری کن.");return;}if(!raw){alert("کد یا بارکد را اسکن کن.");return;}if(!Number.isFinite(qty)||qty<1){alert("تعداد واقعی باید حداقل ۱ باشد.");return;}if(!byCode.has(code)&&!checkOrder.items.some(x=>String(x.code)===code)){const status=$("barcodeScannerStatus");status.className="status wait";status.textContent=`بارکد ${raw} خوانده شد، اما به کد کالای فاکتور وصل نیست. اگر بارکد با کد کالا فرق دارد، بخش «اتصال بارکد به کد کالا» را باز کن و نگاشت را ذخیره کن.`;status.classList.remove("hidden");}packageScans.push({code,rawBarcode:raw,qty});$("scanCode").value="";$("scanQty").value="";renderScans();$("scanCode").focus();};
 $("scanCode").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("scanQty").focus();}});
 $("scanQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("addScan").click();}});
 $("clearScans").onclick=()=>{packageScans=[];renderScans();$("finalCheckResults").innerHTML="";$("finalCheck").className="status wait";$("finalCheck").textContent="فهرست اسکن‌ها پاک شد.";};
@@ -705,10 +748,18 @@ $("readLabelQty").addEventListener("click", async()=>{
    const r=await fetch("/api/ocr",{method:"POST",body:fd});
    const d=await r.json().catch(()=>({ok:false,error:`پاسخ سرویس قابل خواندن نیست (HTTP ${r.status}).`}));
    if(!r.ok||!d.ok)throw new Error(d.error||`خطای OCR (HTTP ${r.status})`);
-   const text=String(d.text||"");$("labelRawText").textContent=text||"متنی از لیبل خوانده نشد.";$("labelRawDetails").classList.remove("hidden");
-   const q=parsePackageQuantityFromOCR(text);
-   if(q!==null){$("scanQty").value=String(q);status.className="status ok";status.textContent=`تعداد پیشنهادی از لیبل: ${toFa(q)}. قبل از ثبت، آن را با نوشته روی بسته تطبیق بده.`;}
-   else {status.className="status wait";status.textContent=`عکس پردازش شد، اما تعداد بسته به‌صورت واضح تشخیص داده نشد (متن ${text.length} نویسه). متن خام پایین را بررسی کن؛ تعداد را دستی وارد کن تا عدد اشتباه ثبت نشود.`;}
+   let text=String(d.text||"");let q=parsePackageQuantityFromOCR(text);let usedLatinFallback=false;
+   // If the mixed/Persian pass cannot find an explicit quantity, try one Latin-oriented pass for labels such as “100 Stück/PCS”.
+   if(q===null){
+     status.textContent="تعداد در مرحله اول واضح نبود؛ در حال تلاش دوم برای نوشته‌های لاتین روی لیبل…";
+     const fd2=new FormData();fd2.append("mode","label-latin");fd2.append("file",small,small.name||"label.jpg");
+     const r2=await fetch("/api/ocr",{method:"POST",body:fd2});
+     const d2=await r2.json().catch(()=>({ok:false,error:`پاسخ مرحله دوم OCR خوانده نشد (HTTP ${r2.status}).`}));
+     if(r2.ok&&d2.ok){const text2=String(d2.text||"");const q2=parsePackageQuantityFromOCR(text2);if(text2){text+=`\n\n--- تلاش دوم (متن لاتین) ---\n${text2}`;}$("labelRawText").textContent=text; if(q2!==null){q=q2;usedLatinFallback=true;}}
+   }
+   $("labelRawText").textContent=text||"متنی از لیبل خوانده نشد.";$("labelRawDetails").classList.remove("hidden");
+   if(q!==null){$("scanQty").value=String(q);status.className="status ok";status.textContent=`تعداد پیشنهادی از لیبل: ${toFa(q)}${usedLatinFallback?' (از تلاش دوم)':''}. قبل از ثبت، آن را با نوشته روی بسته تطبیق بده.`;}
+   else {status.className="status wait";status.textContent=`دو تلاش OCR انجام شد، اما تعداد بسته به‌صورت واضح تشخیص داده نشد. متن خام پایین را بررسی کن؛ اگر تعداد روی لیبل درج نشده، باید دستی وارد شود.`;}
  }catch(e){status.className="status err";status.textContent="خواندن لیبل ناموفق بود: "+(e?.message||String(e));}
  finally{btn.disabled=false;}
 });
@@ -718,15 +769,6 @@ let barcodeScannerInstance = null;
 const barcodePanel = document.getElementById('barcodeScannerPanel');
 const barcodeStatus = document.getElementById('barcodeScannerStatus');
 function barcodeMessage(msg, kind='wait') { barcodeStatus.className = 'status ' + kind; barcodeStatus.textContent = msg; }
-async function stopBarcodeCamera() {
-  if (barcodeScannerInstance) {
-    try { if (barcodeScannerInstance.isScanning) await barcodeScannerInstance.stop(); } catch (e) {}
-    try { await barcodeScannerInstance.clear(); } catch (e) {}
-    barcodeScannerInstance = null;
-  }
-  document.getElementById('barcodeReader').innerHTML = '';
-  barcodePanel.classList.add('hidden');
-}
 let nativeStream = null, nativeScanTimer = null;
 async function stopBarcodeCamera() {
   if(nativeScanTimer){clearInterval(nativeScanTimer);nativeScanTimer=null;}
@@ -747,17 +789,25 @@ document.getElementById('openBarcodeCamera').addEventListener('click', async () 
   try {
     // Prefer the native Android Chrome BarcodeDetector so scanning does not depend on a CDN.
     if ('BarcodeDetector' in window) {
-      const detector=new BarcodeDetector({formats:['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','codabar','data_matrix']});
+      let detector=null;
+      try {
+        const wanted=['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','codabar','data_matrix'];
+        const supported=typeof BarcodeDetector.getSupportedFormats==='function'?await BarcodeDetector.getSupportedFormats():wanted;
+        const formats=wanted.filter(x=>supported.includes(x));
+        if(formats.length) detector=new BarcodeDetector({formats});
+      } catch(e) { detector=null; }
+      if(detector){
       const video=document.createElement('video');video.setAttribute('playsinline','');video.autoplay=true;video.muted=true;video.style.cssText='width:100%;max-height:360px;border-radius:12px;background:#111';host.appendChild(video);
       nativeStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});video.srcObject=nativeStream;await video.play();
       barcodeMessage('دوربین فعال است؛ بارکد را داخل تصویر نگه دار.');
-      nativeScanTimer=setInterval(async()=>{try{if(video.readyState<2)return;const found=await detector.detect(video);if(found.length){document.getElementById('scanCode').value=String(found[0].rawValue||'').trim();barcodeMessage('بارکد خوانده شد. تعداد واقعی بسته را وارد و ثبت کن.','ok');await stopBarcodeCamera();document.getElementById('scanQty').focus();}}catch(e){}},350);
+      nativeScanTimer=setInterval(async()=>{try{if(video.readyState<2)return;const found=await detector.detect(video);if(found.length){const raw=String(found[0].rawValue||'').trim();document.getElementById('scanCode').value=raw;document.getElementById('mapBarcodeValue').value=raw;barcodeMessage('بارکد خوانده شد. تعداد واقعی بسته را وارد و ثبت کن. اگر با کد کالا فرق دارد، اتصال بارکد را یک‌بار ذخیره کن.','ok');await stopBarcodeCamera();document.getElementById('scanQty').focus();}}catch(e){}},350);
       return;
+      }
     }
     if (typeof Html5Qrcode === 'undefined') throw new Error('اسکنر در این مرورگر پشتیبانی نمی‌شود یا کتابخانه بارگذاری نشده؛ کد را دستی وارد کن.');
     barcodeScannerInstance = new Html5Qrcode('barcodeReader', { verbose: false });
     await barcodeScannerInstance.start({ facingMode: 'environment' }, {fps:10,qrbox:{width:250,height:140}}, async decodedText=>{
-      document.getElementById('scanCode').value=String(decodedText||'').trim();barcodeMessage('بارکد خوانده شد. تعداد واقعی بسته را وارد و ثبت کن.','ok');await stopBarcodeCamera();document.getElementById('scanQty').focus();
+      document.getElementById('scanCode').value=String(decodedText||'').trim();document.getElementById('mapBarcodeValue').value=String(decodedText||'').trim();barcodeMessage('بارکد خوانده شد. تعداد واقعی بسته را وارد و ثبت کن. اگر با کد کالا فرق دارد، اتصال بارکد را یک‌بار ذخیره کن.','ok');await stopBarcodeCamera();document.getElementById('scanQty').focus();
     },()=>{});
     barcodeMessage('دوربین فعال است؛ بارکد را داخل کادر نگه دار.');
   } catch (e) { barcodeMessage('اسکن شروع نشد: '+String(e?.message||e)+'؛ مجوز دوربین را بررسی کن یا کد را دستی وارد کن.','err'); }

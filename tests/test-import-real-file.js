@@ -1,0 +1,13 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { parseInvoiceWorkbook } = require('../invoice-import');
+const rows = JSON.parse(fs.readFileSync(__dirname + '/fixture-real-1234.json', 'utf8'));
+const XLSXMock = { utils: { sheet_to_json(sheet) { return sheet.rows; } } };
+const got = parseInvoiceWorkbook({SheetNames:['Sheet1'],Sheets:{Sheet1:{rows}}},XLSXMock);
+assert.equal(got.invoiceNo, '12345');
+assert.equal(got.invoiceDate, '1405/07/06');
+assert.equal(got.customerName, 'جناب آقای مشتری آزمایشی (تست)');
+assert.deepEqual(got.items.map(x=>[x.code,x.qty]), [['11401',50],['18501',50],['25802',20]]);
+assert.equal(got.totalQty,120); assert.equal(got.declaredTotal,120); assert.equal(got.totalMatchesDeclared,true);
+console.log('PASS: actual invoice workbook layout extracted: invoice number, customer, 3 item rows, quantity sum 120');
