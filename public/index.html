@@ -6,6 +6,31 @@
 <title>کنترل سفارش تکنو یدک</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#eef2f7;color:#182230;font-family:Tahoma,Arial,sans-serif}.wrap{max-width:820px;margin:auto;padding:14px}.card{background:#fff;border-radius:22px;padding:18px;margin:12px 0;box-shadow:0 5px 22px #00000010}h1{font-size:23px;margin:0 0 6px}h2{font-size:18px;margin:0 0 12px}.muted{color:#667085;line-height:1.9}.badge{display:inline-block;padding:6px 10px;border-radius:99px;background:#edf2ff;color:#244ea5;font-size:12px;margin-top:8px}.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:140px}input[type=file]{width:100%;padding:12px;border:1px solid #d8dde6;border-radius:13px;background:#fff}button{border:0;border-radius:14px;padding:13px 16px;font-size:16px;font-weight:bold;cursor:pointer}.primary{background:#2867df;color:#fff;width:100%;margin-top:10px}.secondary{background:#edf2ff;color:#234da5}.danger{background:#ffe9e9;color:#9b2222}.status{padding:12px 14px;border-radius:14px;margin-top:12px;line-height:1.9}.ok{background:#e9f8ef;color:#146b37}.err{background:#ffe9e9;color:#9a2020}.wait{background:#fff4df;color:#875700}.hidden{display:none}.tableWrap{overflow:auto}table{width:100%;border-collapse:collapse;margin-top:10px;min-width:600px}th,td{padding:10px;border-bottom:1px solid #eceff3;text-align:right;vertical-align:middle}th{background:#f7f8fa}.code{font-weight:bold;direction:ltr;text-align:right}.qty{width:90px;padding:9px;border:1px solid #cfd6df;border-radius:10px;font-size:16px}.warn{color:#9a5b00;font-size:12px;display:block;margin-top:4px}.good{color:#146b37}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.sum{background:#f7f8fa;border-radius:14px;padding:12px;text-align:center}.sum b{display:block;font-size:20px;margin-bottom:4px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.actions button{flex:1;min-width:140px}.preview{width:100%;max-height:360px;object-fit:contain;border-radius:14px;background:#f5f6f8;margin-top:10px}.small{font-size:12px;color:#667085}.progress{height:7px;background:#e7eaf0;border-radius:99px;overflow:hidden;margin-top:10px}.progress>div{height:100%;width:0;background:#2867df;transition:width .3s}.picker{padding:12px;border:1px solid #d8dde6;border-radius:13px;width:100%;font-size:16px}
+
+/* Responsive mobile layout fix */
+html{width:100%;max-width:100%;overflow-x:hidden;-webkit-text-size-adjust:100%}
+body{width:100%;max-width:100%;overflow-x:hidden}
+.wrap{width:100%;max-width:820px;margin:0 auto;padding:clamp(8px,3vw,14px)}
+.card{min-width:0;max-width:100%}
+.row,.actions,.summary{min-width:0;max-width:100%}
+.row>*{min-width:0;max-width:100%}
+input,button,select,textarea{max-width:100%;min-width:0}
+.small,.muted,pre,code,.filename,.fileName,[id*="file"],[class*="file"]{overflow-wrap:anywhere;word-break:break-word}
+.tableWrap{width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media(max-width:600px){
+ .wrap{width:100%;max-width:100%;margin:0;padding:8px}
+ .card{width:100%;margin:8px 0;padding:14px;border-radius:18px}
+ h1{font-size:21px} h2{font-size:17px}
+ .row{gap:8px}
+ .row>*{flex:1 1 100%;width:100%}
+ .summary{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+ .sum{padding:10px 5px;min-width:0;overflow-wrap:anywhere}
+ .sum b{font-size:18px}
+ .actions{gap:7px}
+ .actions button{flex:1 1 calc(50% - 7px);min-width:0;padding:12px 8px;font-size:14px}
+ input[type=file]{font-size:13px;padding:9px}
+ table{min-width:560px}
+}
 </style>
 </head>
 <body>
