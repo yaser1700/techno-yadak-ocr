@@ -31,6 +31,7 @@ input,button,select,textarea{max-width:100%;min-width:0}
  input[type=file]{font-size:13px;padding:9px}
  table{min-width:560px}
 }
+.mismatch td{background:#fff0f0;color:#8b1e1e;font-weight:600}
 </style>
 </head>
 <body>
@@ -91,8 +92,15 @@ input,button,select,textarea{max-width:100%;min-width:0}
   <div class="muted">شماره فاکتور را وارد کن، سپس بارکد یا کد روی بسته را اسکن/وارد کن و تعداد واقعی همان بسته را ثبت کن. اگر لیبل تعداد داخل بسته دارد، آن مقدار را وارد کن؛ تعداد بسته از بانک کالا حدس زده نمی‌شود.</div>
   <div class="row" style="margin-top:10px"><input id="checkOrderCode" class="picker" placeholder="شماره فاکتور / مأموریت"><button id="loadCheckOrder" class="secondary">📥 بارگذاری فاکتور</button></div>
   <div id="checkOrderMeta" class="status wait hidden"></div>
-  <div class="row" style="margin-top:10px"><input id="scanCode" class="picker" placeholder="کد / بارکد اسکن‌شده یا ورود دستی" autocomplete="off"><input id="scanQty" class="picker" type="number" min="1" value="1" placeholder="تعداد واقعی این بسته"></div>
+  <div class="row" style="margin-top:10px"><input id="scanCode" class="picker" placeholder="کد / بارکد اسکن‌شده یا ورود دستی" autocomplete="off"><input id="scanQty" class="picker" type="number" min="1" value="" placeholder="تعداد واقعی روی لیبل (مثلاً ۵)"></div>
   <button id="openBarcodeCamera" class="secondary" type="button" style="width:100%;margin-top:8px">📷 اسکن بارکد با دوربین گوشی</button>
+  <div class="card" style="padding:12px;margin-top:8px;background:#f7f9ff">
+    <b>خواندن تعداد از روی لیبل</b>
+    <div class="small">از برچسب بسته عکس بگیر یا تصویر آن را انتخاب کن. اگر عبارت تعداد مثل «۵ عدد» خوانده شود، مقدار پیشنهاد می‌شود؛ در غیر این صورت باید دستی تأیید کنی.</div>
+    <input id="labelPhoto" type="file" accept="image/*" capture="environment" style="margin-top:8px">
+    <button id="readLabelQty" class="secondary" type="button" style="width:100%;margin-top:8px">🔎 خواندن تعداد از عکس لیبل</button>
+    <div id="labelQtyStatus" class="status wait hidden"></div>
+  </div>
   <div id="barcodeScannerPanel" class="card hidden" style="padding:12px;margin-top:10px"><div id="barcodeReader" style="width:100%;max-width:100%;overflow:hidden"></div><div id="barcodeScannerStatus" class="status wait">در حال آماده‌سازی دوربین…</div><button id="stopBarcodeCamera" type="button" class="danger" style="width:100%;margin-top:8px">بستن دوربین</button></div>
   <button id="addScan" class="secondary" style="width:100%;margin-top:8px">➕ ثبت بسته اسکن‌شده</button>
   <div id="scanList" class="small" style="margin-top:10px">هنوز بسته‌ای ثبت نشده است.</div>
@@ -122,7 +130,18 @@ function renderWorkerOrder(o){
 }
 let workerOrder=null;
 $('loadOrder').onclick=async()=>{try{const id=$('orderCode').value.trim().toUpperCase();if(!id)throw new Error('شماره فاکتور را وارد کن.');const d=await apiJson('/api/orders/'+encodeURIComponent(id));workerOrder=d.order;renderWorkerOrder(workerOrder);$('workerStatus').className='status ok';$('workerStatus').textContent=`ماموریت ${workerOrder.id} — مشتری: ${workerOrder.customerName||'ثبت نشده'} — جمع‌آور: ${workerOrder.picker}`;$('workerStatus').classList.remove('hidden');}catch(e){$('workerStatus').className='status err';$('workerStatus').textContent=e.message;$('workerStatus').classList.remove('hidden')}};
-$('submitWorker').onclick=async()=>{if(!workerOrder)return;const items=workerOrder.items.map(x=>{const q=document.querySelector(`.workerQty[data-i="${x.index}"]`);const c=document.querySelector(`.workerCheck[data-i="${x.index}"]`);return {...x,actualQty:Number(q?.value)||0,checked:Boolean(c?.checked)}});try{const d=await apiJson('/api/orders/'+workerOrder.id,{method:'PATCH',body:JSON.stringify({items,status:'collected'})});workerOrder=d.order;const issues=workerOrder.items.filter(x=>x.actualQty!==x.expectedQty);$('finalCheck').className='status '+(issues.length?'err':'ok');$('finalCheck').textContent=issues.length?`⚠️ ${toFa(issues.length)} ردیف نیازمند بررسی است: ${issues.map(x=>`کد ${x.code} (${x.issue})`).join('، ')}`:'✅ همه اقلام طبق فاکتور جمع‌آوری شده‌اند.';}catch(e){alert(e.message)}};
+$('submitWorker').onclick=async()=>{
+ if(!workerOrder){$('workerStatus').className='status err';$('workerStatus').textContent='ابتدا با شماره فاکتور، مأموریت را دریافت کن.';$('workerStatus').classList.remove('hidden');return;}
+ const btn=$('submitWorker');btn.disabled=true;btn.textContent='در حال ثبت جمع‌آوری…';
+ const items=workerOrder.items.map(x=>{const q=document.querySelector(`.workerQty[data-i="${x.index}"]`);const c=document.querySelector(`.workerCheck[data-i="${x.index}"]`);return {...x,actualQty:Number(q?.value)||0,checked:Boolean(c?.checked)}});
+ try{const d=await apiJson('/api/orders/'+encodeURIComponent(workerOrder.id),{method:'PATCH',body:JSON.stringify({items,status:'collected'})});workerOrder=d.order;
+  const issues=workerOrder.items.filter(x=>x.actualQty!==x.expectedQty);
+  $('workerStatus').className='status '+(issues.length?'err':'ok');
+  $('workerStatus').textContent=issues.length?`جمع‌آوری ثبت شد؛ ${toFa(issues.length)} ردیف اختلاف دارد.`:'جمع‌آوری ثبت و برای کنترل ارسال شد.';
+  $('workerStatus').classList.remove('hidden');
+ }catch(e){$('workerStatus').className='status err';$('workerStatus').textContent='ثبت انجام نشد: '+e.message;$('workerStatus').classList.remove('hidden');}
+ finally{btn.disabled=false;btn.textContent='✅ ثبت جمع‌آوری و ارسال برای کنترل';}
+};
 $('assignOrder').onclick=async()=>{try{if(!currentItems.length)throw new Error('ابتدا فاکتور را بخوان.');if(currentItems.some(x=>x.qty==null||!Number.isFinite(Number(x.qty))||Number(x.qty)<1))throw new Error('تعداد یک یا چند ردیف مشخص نیست. ابتدا تعدادها را از روی فاکتور اصلاح کن.');const picker=$('picker').value.trim();if(!picker)throw new Error('نام جمع‌آور را انتخاب کن.'); if(!$("invoiceNo").value.trim())throw new Error('شماره فاکتور را وارد یا اصلاح کن.');const d=await apiJson('/api/orders',{method:'POST',body:JSON.stringify({picker,customerName:$("customerName").value.trim(),items:currentItems,invoiceNo:$("invoiceNo").value.trim(),invoiceName:lastFile?.name||''})});alert(`ماموریت ساخته شد.\nشماره فاکتور: ${d.order.id}\nاین کد را برای ${picker} بفرست.`);}catch(e){alert(e.message)}};
 </script>
 <script>
@@ -526,7 +545,18 @@ function renderWorkerOrder(o){
 }
 let workerOrder=null;
 $('loadOrder').onclick=async()=>{try{const id=$('orderCode').value.trim().toUpperCase();if(!id)throw new Error('شماره فاکتور را وارد کن.');const d=await apiJson('/api/orders/'+encodeURIComponent(id));workerOrder=d.order;renderWorkerOrder(workerOrder);$('workerStatus').className='status ok';$('workerStatus').textContent=`ماموریت ${workerOrder.id} — مشتری: ${workerOrder.customerName||'ثبت نشده'} — جمع‌آور: ${workerOrder.picker}`;$('workerStatus').classList.remove('hidden');}catch(e){$('workerStatus').className='status err';$('workerStatus').textContent=e.message;$('workerStatus').classList.remove('hidden')}};
-$('submitWorker').onclick=async()=>{if(!workerOrder)return;const items=workerOrder.items.map(x=>{const q=document.querySelector(`.workerQty[data-i="${x.index}"]`);const c=document.querySelector(`.workerCheck[data-i="${x.index}"]`);return {...x,actualQty:Number(q?.value)||0,checked:Boolean(c?.checked)}});try{const d=await apiJson('/api/orders/'+workerOrder.id,{method:'PATCH',body:JSON.stringify({items,status:'collected'})});workerOrder=d.order;const issues=workerOrder.items.filter(x=>x.actualQty!==x.expectedQty);$('finalCheck').className='status '+(issues.length?'err':'ok');$('finalCheck').textContent=issues.length?`⚠️ ${toFa(issues.length)} ردیف نیازمند بررسی است: ${issues.map(x=>`کد ${x.code} (${x.issue})`).join('، ')}`:'✅ همه اقلام طبق فاکتور جمع‌آوری شده‌اند.';}catch(e){alert(e.message)}};
+$('submitWorker').onclick=async()=>{
+ if(!workerOrder){$('workerStatus').className='status err';$('workerStatus').textContent='ابتدا با شماره فاکتور، مأموریت را دریافت کن.';$('workerStatus').classList.remove('hidden');return;}
+ const btn=$('submitWorker');btn.disabled=true;btn.textContent='در حال ثبت جمع‌آوری…';
+ const items=workerOrder.items.map(x=>{const q=document.querySelector(`.workerQty[data-i="${x.index}"]`);const c=document.querySelector(`.workerCheck[data-i="${x.index}"]`);return {...x,actualQty:Number(q?.value)||0,checked:Boolean(c?.checked)}});
+ try{const d=await apiJson('/api/orders/'+encodeURIComponent(workerOrder.id),{method:'PATCH',body:JSON.stringify({items,status:'collected'})});workerOrder=d.order;
+  const issues=workerOrder.items.filter(x=>x.actualQty!==x.expectedQty);
+  $('workerStatus').className='status '+(issues.length?'err':'ok');
+  $('workerStatus').textContent=issues.length?`جمع‌آوری ثبت شد؛ ${toFa(issues.length)} ردیف اختلاف دارد.`:'جمع‌آوری ثبت و برای کنترل ارسال شد.';
+  $('workerStatus').classList.remove('hidden');
+ }catch(e){$('workerStatus').className='status err';$('workerStatus').textContent='ثبت انجام نشد: '+e.message;$('workerStatus').classList.remove('hidden');}
+ finally{btn.disabled=false;btn.textContent='✅ ثبت جمع‌آوری و ارسال برای کنترل';}
+};
 $('assignOrder').onclick=async()=>{try{if(!currentItems.length)throw new Error('ابتدا فاکتور را بخوان.');if(currentItems.some(x=>x.qty==null||!Number.isFinite(Number(x.qty))||Number(x.qty)<1))throw new Error('تعداد یک یا چند ردیف مشخص نیست. ابتدا تعدادها را از روی فاکتور اصلاح کن.');const picker=$('picker').value.trim();if(!picker)throw new Error('نام جمع‌آور را انتخاب کن.'); if(!$("invoiceNo").value.trim())throw new Error('شماره فاکتور را وارد یا اصلاح کن.');const d=await apiJson('/api/orders',{method:'POST',body:JSON.stringify({picker,customerName:$("customerName").value.trim(),items:currentItems,invoiceNo:$("invoiceNo").value.trim(),invoiceName:lastFile?.name||''})});alert(`ماموریت ساخته شد.\nشماره فاکتور: ${d.order.id}\nاین کد را برای ${picker} بفرست.`);}catch(e){alert(e.message)}};
 
 // Final package-check workflow. Package quantities are entered per scanned label, never inferred from product master.
@@ -537,15 +567,45 @@ function renderScans(){
  el.querySelectorAll("[data-remove-scan]").forEach(b=>b.onclick=()=>{packageScans.splice(Number(b.dataset.removeScan),1);renderScans();});
 }
 $("loadCheckOrder").onclick=async()=>{try{const id=$("checkOrderCode").value.trim();if(!id)throw new Error("شماره فاکتور را وارد کن.");const d=await apiJson("/api/orders/"+encodeURIComponent(id));checkOrder=d.order;packageScans=Array.isArray(checkOrder.packageScans)?checkOrder.packageScans:[];$("checkOrderMeta").className="status ok";$("checkOrderMeta").textContent=`فاکتور ${checkOrder.id} — مشتری: ${checkOrder.customerName||"ثبت نشده"} — جمع‌آور: ${checkOrder.picker}`;renderScans();$("finalCheckResults").innerHTML="";$("finalCheck").className="status wait";$("finalCheck").textContent="فاکتور بارگذاری شد؛ بسته‌ها را اسکن کن.";}catch(e){$("checkOrderMeta").className="status err";$("checkOrderMeta").textContent=e.message;$("checkOrderMeta").classList.remove("hidden");}};
-$("addScan").onclick=()=>{const code=norm($("scanCode").value).replace(/\s/g,"");const qty=Number($("scanQty").value);if(!checkOrder){alert("ابتدا فاکتور را بارگذاری کن.");return;}if(!code){alert("کد یا بارکد را اسکن کن.");return;}if(!Number.isFinite(qty)||qty<1){alert("تعداد واقعی باید حداقل ۱ باشد.");return;}packageScans.push({code,qty});$("scanCode").value="";$("scanQty").value="1";renderScans();$("scanCode").focus();};
+$("addScan").onclick=()=>{const code=norm($("scanCode").value).replace(/\s/g,"");const qty=Number($("scanQty").value);if(!checkOrder){alert("ابتدا فاکتور را بارگذاری کن.");return;}if(!code){alert("کد یا بارکد را اسکن کن.");return;}if(!Number.isFinite(qty)||qty<1){alert("تعداد واقعی باید حداقل ۱ باشد.");return;}packageScans.push({code,qty});$("scanCode").value="";$("scanQty").value="";renderScans();$("scanCode").focus();};
 $("scanCode").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("scanQty").focus();}});
 $("scanQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("addScan").click();}});
 $("clearScans").onclick=()=>{packageScans=[];renderScans();$("finalCheckResults").innerHTML="";$("finalCheck").className="status wait";$("finalCheck").textContent="فهرست اسکن‌ها پاک شد.";};
-$("runFinalCheck").onclick=async()=>{try{if(!checkOrder)throw new Error("ابتدا فاکتور را بارگذاری کن.");if(!packageScans.length)throw new Error("هنوز بسته‌ای ثبت نشده است.");const d=await apiJson(`/api/orders/${encodeURIComponent(checkOrder.id)}/package-scans`,{method:"POST",body:JSON.stringify({scans:packageScans})});checkOrder=d.order;const fc=d.finalCheck;$("finalCheck").className="status "+(fc.ok?"ok":"err");$("finalCheck").textContent=fc.ok?"همه کدها و تعدادهای اسکن‌شده با فاکتور مطابقت دارند.":"مغایرت پیدا شد؛ ردیف‌های زیر را بررسی کن.";let rows=fc.results.map(x=>`<tr><td>${escapeHtml(x.code)}</td><td>${escapeHtml(x.name)}</td><td>${toFa(x.expectedQty)}</td><td>${toFa(x.scannedQty)}</td><td>${toFa(x.diff)}</td><td>${escapeHtml(x.status)}</td></tr>`);for(const x of fc.extras)rows.push(`<tr><td>${escapeHtml(x.code)}</td><td>—</td><td>۰</td><td>${toFa(x.scannedQty)}</td><td>${toFa(x.scannedQty)}</td><td>${escapeHtml(x.status)}</td></tr>`);$("finalCheckResults").innerHTML=`<table style="min-width:520px"><thead><tr><th>کد</th><th>نام کالا</th><th>فاکتور</th><th>اسکن‌شده</th><th>اختلاف</th><th>وضعیت</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;}catch(e){$("finalCheck").className="status err";$("finalCheck").textContent=e.message;}};
+$("runFinalCheck").onclick=async()=>{try{if(!checkOrder)throw new Error("ابتدا فاکتور را بارگذاری کن.");if(!packageScans.length)throw new Error("هنوز بسته‌ای ثبت نشده است.");const d=await apiJson(`/api/orders/${encodeURIComponent(checkOrder.id)}/package-scans`,{method:"POST",body:JSON.stringify({scans:packageScans})});checkOrder=d.order;const fc=d.finalCheck;$("finalCheck").className="status "+(fc.ok?"ok":"err");$("finalCheck").textContent=fc.ok?"همه کدها و تعدادهای اسکن‌شده با فاکتور مطابقت دارند.":"مغایرت پیدا شد؛ ردیف‌های زیر را بررسی کن.";const mismatchRows=fc.results.filter(x=>x.diff!==0).map(x=>`<tr class="mismatch"><td>${escapeHtml(x.code)}</td><td>${escapeHtml(x.name)}</td><td>${toFa(x.expectedQty)}</td><td>${toFa(x.scannedQty)}</td><td>${toFa(x.diff)}</td><td>${escapeHtml(x.status)}</td></tr>`);
+ const extraRows=fc.extras.map(x=>`<tr class="mismatch"><td>${escapeHtml(x.code)}</td><td>کد خارج از فاکتور</td><td>۰</td><td>${toFa(x.scannedQty)}</td><td>${toFa(x.scannedQty)}</td><td>${escapeHtml(x.status)}</td></tr>`);
+ const matchingRows=fc.results.filter(x=>x.diff===0).map(x=>`<tr><td>${escapeHtml(x.code)}</td><td>${escapeHtml(x.name)}</td><td>${toFa(x.expectedQty)}</td><td>${toFa(x.scannedQty)}</td><td>${toFa(x.diff)}</td><td>${escapeHtml(x.status)}</td></tr>`);
+ const rows=[...mismatchRows,...extraRows,...matchingRows];
+ $("finalCheckResults").innerHTML=`<table style="min-width:520px"><thead><tr><th>کد</th><th>نام کالا</th><th>فاکتور</th><th>اسکن‌شده</th><th>اختلاف</th><th>وضعیت</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;}catch(e){$("finalCheck").className="status err";$("finalCheck").textContent=e.message;}};
 </script>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
+
+
+// Read explicit package quantity from a photo of the label using the existing Persian OCR endpoint.
+// Never silently assume 1; if OCR is ambiguous, ask the worker to type the quantity.
+$("readLabelQty").addEventListener("click", async()=>{
+ const f=$("labelPhoto").files[0], status=$("labelQtyStatus"), btn=$("readLabelQty");
+ status.className="status wait";status.textContent="در حال خواندن عکس لیبل…";status.classList.remove("hidden");
+ if(!f){status.className="status err";status.textContent="ابتدا از لیبل بسته عکس بگیر یا یک تصویر انتخاب کن.";return;}
+ btn.disabled=true;
+ try{
+   const fd=new FormData();fd.append("file",f);
+   const r=await fetch("/api/ocr",{method:"POST",body:fd});const d=await r.json();
+   if(!r.ok||!d.ok)throw new Error(d.error||"خواندن لیبل ناموفق بود.");
+   const text=norm(d.text||"");
+   const patterns=[
+     /(?:تعداد\s*(?:داخل\s*بسته)?|مقدار\s*بسته|تعداد\s*در\s*بسته|qty|quantity|pack\s*qty)\s*[:：=\-]?\s*([0-9]{1,4})/i,
+     /([0-9]{1,4})\s*(?:عدد\s*)?(?:داخل\s*بسته|در\s*بسته|عدد\s*در\s*بسته)/i,
+     /(?:بسته|کارتن)\s*[:：=\-]?\s*([0-9]{1,4})\s*عدد/i
+   ];
+   let q=null;for(const re of patterns){const m=text.match(re);if(m){const n=Number(m[1]);if(n>=1&&n<=9999){q=n;break;}}}
+   if(q!==null){$("scanQty").value=String(q);status.className="status ok";status.textContent=`تعداد پیشنهادی از روی لیبل: ${toFa(q)}. قبل از ثبت، با نوشته روی بسته تطبیق بده.`;}
+   else {status.className="status wait";status.textContent="OCR تعداد مشخصی مثل «۵ عدد» پیدا نکرد. تعداد روی لیبل را دستی وارد کن؛ حدس زده نشد.";}
+ }catch(e){status.className="status err";status.textContent="خواندن لیبل انجام نشد: "+e.message;}
+ finally{btn.disabled=false;}
+});
+
 // Camera-based barcode scanning for Android/iOS browsers over HTTPS.
 let barcodeScannerInstance = null;
 const barcodePanel = document.getElementById('barcodeScannerPanel');

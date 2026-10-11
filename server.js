@@ -42,21 +42,30 @@ app.post("/api/import-invoice", upload.single("file"), (req, res) => {
       }
       if(found) break;
     }
-    // Extract invoice metadata and customer name from invoice header rows.
+    // Extract invoice metadata robustly, including Iranian invoice templates where
+    // the customer name appears immediately before the "نام خریدار" header cell.
+    const cleanMeta = v => String(v ?? "").replace(/ـ/g,"").replace(/[يى]/g,"ی").replace(/ك/g,"ک").replace(/\u200c/g," ").replace(/\s+/g," ").trim();
     for(const sn of book.SheetNames){
       const rows=XLSX.utils.sheet_to_json(book.Sheets[sn],{header:1,defval:"",raw:false});
-      for(const row of rows.slice(0,20)){
-        const vals=row.map(v=>String(v??"").trim()); const line=vals.join(" ");
-        const m=line.match(/(?:شماره\s*فاکتور|شماره\s*سند|شماره\s*[:：])\s*[:：]?\s*([0-9۰-۹]+)/);if(m)invoiceNo=m[1];
-        const d=line.match(/(?:تاریخ\s*فاکتور|تاریخ|تـاریخ)\s*[:：]?\s*([0-9۰-۹]{4}[\/\-][0-9۰-۹]{1,2}[\/\-][0-9۰-۹]{1,2})/);if(d)invoiceDate=d[1];
-        // Common Iranian invoice template: customer value often appears on the same row as "شماره اقتصادی" in the customer block.
-        if(!customerName && vals.some(v=>/جناب آقای|سرکار خانم|آقای\s|خانم\s|مشتری|خریدار/.test(v))){
-          const candidate=vals.find(v=>/^(جناب آقای|سرکار خانم|آقای|خانم|مشتری|خریدار)/.test(v));
-          if(candidate) customerName=candidate.replace(/\s+/g," ").trim();
+      for(const row of rows.slice(0,30)){
+        const vals=row.map(cleanMeta); const line=vals.join(" ");
+        const m=line.match(/(?:شماره\s*فاکتور|شماره\s*سند|شماره\s*[:：])\s*[:：]?\s*([0-9۰-۹]+)/);
+        if(m) invoiceNo=m[1];
+        const d=line.match(/(?:تاریخ\s*فاکتور|تاریخ)\s*[:：]?\s*([0-9۰-۹]{4}[\/\-][0-9۰-۹]{1,2}[\/\-][0-9۰-۹]{1,2})/);
+        if(d) invoiceDate=d[1];
+        if(!customerName){
+          // Header and value may be adjacent in either order on the same row.
+          const buyerIdx=vals.findIndex(v=>/نام\s*(?:مشتری|خریدار)|مشخصات\s*(?:مشتری|خریدار)|خریدار/.test(norm(v)));
+          if(buyerIdx>=0){
+            const before=vals.slice(0,buyerIdx).reverse().find(v=>v && !/^(شماره اقتصادی|کد پستی|نشانی|تلفن|همراه|نمابر|خریدار|مشتری)$/i.test(norm(v)));
+            const after=vals.slice(buyerIdx+1).find(v=>v && !/^(خریدار|مشتری|شماره اقتصادی|کد پستی|نشانی|تلفن|همراه|نمابر)$/i.test(norm(v)));
+            const candidate=[before,after].find(v=>v && !/^(نام|مشخصات|خریدار|مشتری)$/i.test(norm(v)));
+            if(candidate && !/^(تکنو یدک|گروه تولیدی|فروشنده)/.test(candidate)) customerName=candidate;
+          }
         }
         if(!customerName){
-          const idx=vals.findIndex(v=>/نام\s*(?:مشتری|خریدار)|مشخصات\s*(?:مشتری|خریدار)/.test(norm(v)));
-          if(idx>=0){const candidate=vals.slice(idx+1).find(v=>v && !/^(کد|شماره|نشانی|تلفن|تاریخ)/.test(norm(v)));if(candidate)customerName=candidate;}
+          const candidate=vals.find(v=>/^(جناب\s*آقای|سرکار\s*خانم|آقای|خانم)\s*\S+/.test(v));
+          if(candidate) customerName=candidate;
         }
       }
     }
