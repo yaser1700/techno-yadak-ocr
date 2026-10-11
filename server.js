@@ -63,11 +63,11 @@ app.post("/api/import-invoice", upload.single("file"), (req, res) => {
 
 app.post("/api/orders", (req,res)=>{
   try {
-    const {picker, items, invoiceNo, invoiceName} = req.body || {};
+    const {picker, customerName, items, invoiceNo, invoiceName} = req.body || {};
     if(!picker || !invoiceNo || !Array.isArray(items) || !items.length) return res.status(400).json({ok:false,error:"شماره فاکتور، نام جمع‌آور و اقلام فاکتور الزامی است."});
     const id=String(invoiceNo).trim();
     if(ORDERS.has(id)) return res.status(409).json({ok:false,error:"برای این شماره فاکتور قبلاً مأموریت ساخته شده است."});
-    const order={id,picker,invoiceNo:id,invoiceName:invoiceName||"",items:items.map((x,i)=>({index:i,code:String(x.code||""),name:String(x.name||""),expectedQty:Number(x.qty)||0,actualQty:0,checked:false,issue:""})),status:"assigned",createdAt:new Date().toISOString()};
+    const order={id,picker,customerName:String(customerName||"").trim(),invoiceNo:id,invoiceName:invoiceName||"",items:items.map((x,i)=>({index:i,code:String(x.code||""),name:String(x.name||""),expectedQty:Number(x.qty)||0,actualQty:0,checked:false,issue:""})),status:"assigned",createdAt:new Date().toISOString()};
     ORDERS.set(id,order);
     res.json({ok:true,order});
   } catch(e){res.status(500).json({ok:false,error:e.message});}
