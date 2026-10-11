@@ -26,7 +26,7 @@
 <div class="card">
   <h2>۲) مشخصات و عکس فاکتور</h2>
   <input id="invoiceNo" class="picker" inputmode="numeric" placeholder="شماره فاکتور" style="margin-bottom:10px">
-  <div class="row"><input id="invoice" type="file" accept="image/*,.pdf,application/pdf"><input id="camera" type="file" accept="image/*" capture="environment" style="display:none"><button id="cameraBtn" type="button" class="secondary">📷 عکس با دوربین</button></div><div class="small" style="margin-top:8px">می‌توانی عکس، PDF یا فایل فاکتور را انتخاب کنی. دکمه دوربین فقط دوربین را باز می‌کند.</div>
+  <div class="row"><input id="invoice" type="file" accept="image/*,.pdf,application/pdf"><input id="camera" type="file" accept="image/*" capture="environment" style="display:none"><button id="cameraBtn" type="button" class="secondary">📷 عکس با دوربین</button></div><div class="small" style="margin-top:8px">برای عکس یا PDF از OCR استفاده کن؛ اگر فاکتور اکسل است، آن را از بخش زیر وارد کن تا تعدادها مستقیم از فایل خوانده شوند.</div><div class="card" style="background:#f7f9ff;margin-top:12px;padding:12px"><b>📊 ورود مستقیم فاکتور اکسل</b><input id="excelInvoice" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="margin-top:10px"><button id="importExcel" type="button" class="secondary" style="width:100%;margin-top:8px">📥 استخراج اقلام از اکسل (بدون OCR)</button><div class="small">فایل XLS و XLSX پشتیبانی می‌شود. قبل از ارسال سفارش، نتیجه را بازبینی کن.</div></div>
   <img id="preview" class="preview hidden" alt="پیش‌نمایش فاکتور">
   <button id="go" class="primary">📷 خواندن و استخراج اقلام فاکتور</button>
   <div id="st" class="status hidden"></div>
@@ -101,6 +101,26 @@ $("cameraBtn").onclick=()=>$("camera").click();
 $("camera").addEventListener("change",()=>{if($("camera").files[0]){$("invoice").value="";lastFile=$("camera").files[0];renderSelectedFile(lastFile)}});
 $("invoice").addEventListener("change",()=>{lastFile=$("invoice").files[0]||null;renderSelectedFile(lastFile)});
 function renderSelectedFile(f){if(!f){$("preview").classList.add("hidden");return;} $("info").textContent=`${f.name} — ${(f.size/1024/1024).toFixed(2)} MB`; if(f.type.startsWith("image/")){const u=URL.createObjectURL(f);$("preview").src=u;$("preview").classList.remove("hidden");}else{$("preview").classList.add("hidden");}}
+
+function normalizeExcelCode(s){return norm(s).replace(/[,،\s]/g,"")}
+$("importExcel").onclick=async()=>{
+ const f=$("excelInvoice").files[0]; if(!f){setStatus("ابتدا فایل اکسل فاکتور را انتخاب کن.","err");return;}
+ const btn=$("importExcel");btn.disabled=true;
+ try{
+  setStatus("در حال خواندن مستقیم فایل اکسل؛ OCR اجرا نمی‌شود...","wait");
+  const fd=new FormData();fd.append("file",f);
+  const r=await fetch("/api/import-invoice",{method:"POST",body:fd});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"خواندن اکسل ناموفق بود.");
+  if(d.invoiceNo && !$("invoiceNo").value)$("invoiceNo").value=norm(d.invoiceNo);
+  if(!$("invoiceNo").value)$("invoiceNo").value=f.name.replace(/\.(xls|xlsx|xlsm)$/i,"");
+  lastFile=f;lastText=`ورود مستقیم اکسل: ${f.name}\nبرگه: ${d.sheet}\nتعداد ردیف: ${d.items.length}\nجمع تعداد: ${d.totalQty}`;$("raw").textContent=lastText;
+  currentItems=d.items.map((it,i)=>{const product=byCode.get(normalizeExcelCode(it.code));return {code:normalizeExcelCode(it.code),name:product?.name||it.name||"شرح در بانک پیدا نشد",qty:Number(it.qty),confidence:product?"high":"medium",source:product?"مستقیم از اکسل؛ کد در بانک پیدا شد":"مستقیم از اکسل؛ کد در بانک پیدا نشد",index:i,bankMatch:Boolean(product),invoiceName:it.name||""};});
+  renderItems(currentItems);
+  const missing=currentItems.filter(x=>!x.bankMatch).length;
+  setStatus(`اکسل خوانده شد: ${currentItems.length} ردیف، جمع تعداد ${toFa(d.totalQty)}. ${missing?`${toFa(missing)} کد در بانک پیدا نشد؛ بازبینی کن.`:"همه کدها در بانک محصولات پیدا شدند."}`,missing?"wait":"ok");
+  $("info").textContent=`فایل اکسل: ${f.name} | برگه: ${d.sheet} | تاریخ: ${d.invoiceDate||"در فایل تشخیص داده نشد"}`;
+ }catch(e){setStatus("ورود اکسل انجام نشد: "+e.message,"err");}finally{btn.disabled=false;}
+};
+
 
 function norm(s){return String(s||"").replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[٬،]/g,",").replace(/[٫]/g,".").replace(/[‐‑–—]/g,"-").replace(/\u200c/g," ").replace(/\s+/g," ").trim()}
 function digits(s){return norm(s).replace(/,/g,"")}
@@ -213,61 +233,103 @@ function extractMarkedProductRows(text){
 }
 
 function extractQuantityColumnBlock(text, expectedCount){
- const lines=String(text||'').split(/\r?\n/).map(x=>norm(x)).filter(Boolean);
- let header=-1;
- for(let i=0;i<lines.length;i++){
-   if(/^(?:مقدار\s*(?:کل)?|تعداد\s*(?:کل)?)\s*[:：]?$/i.test(lines[i])) {header=i;break;}
+ const lines=String(text||'').split(/\r?\n/).map(x=>norm(x));
+ const tableHeader=lines.findIndex(x=>/کد\s*کالا\s*یا\s*خدمات|شرح\s*کالا|کد\s*کالا/.test(x));
+ const candidates=[];
+ for(let i=Math.max(0,tableHeader);i<lines.length;i++){
+   if(/^(?:مقدار|تعداد)(?:\s*کل)?\s*[:：]?$/i.test(lines[i])) candidates.push(i);
  }
- if(header<0){
-   for(let i=0;i<lines.length;i++) if(/(?:مقدار\s*کل|تعداد\s*کل)/.test(lines[i]) && !/مانده|توضیحات/.test(lines[i])) {header=i;break;}
+ // Prefer the quantity heading inside the item table, not the invoice's summary "مقدار کل" near the footer.
+ let header=candidates.length?candidates[candidates.length-1]:-1;
+ if(header<0 && tableHeader<0){
+   for(let i=0;i<lines.length;i++) if(/^(?:مقدار|تعداد)\s*[:：]?$/i.test(lines[i])) header=i;
  }
- if(header<0) return {values:[],reason:'سرستون مقدار/تعداد در متن OCR پیدا نشد.'};
+ if(header<0) return {values:[],reason:'سرستون مقدار/تعداد در جدول اقلام OCR پیدا نشد.'};
  const values=[];
- const stop=/(بهای\s*واحد|مبلغ\s*کل|جمع\s*کل|تخفیف|مالیات|عوارض|توضیحات|مانده|فروشنده|خریدار|شماره\s*کارت|شماره\s*حساب|تاریخ)/;
+ const stop=/(بهای\s*واحد|مبلغ\s*کل|جمع\s*کل|تخفیف|مالیات|عوارض|توضیحات|مانده|فروشنده|خریدار|شماره\s*کارت|شماره\s*حساب|تاریخ|واحد\s*اندازه\s*گیری|شرح\s*کالا|کد\s*کالا)/;
  for(let i=header+1;i<lines.length && values.length<expectedCount;i++){
    const line=lines[i];
+   if(!line) continue;
    if(stop.test(line)) break;
-   const cleaned=line.replace(/[|│¦;]/g,' ').replace(/[،٬]/g,',').trim();
-   if(/^(?:عدد|دست|بسته|کارتن|مقدار|تعداد)$/i.test(cleaned)) continue;
-   let m=cleaned.match(/^([0-9]{1,3})\s*(?:عدد)?\s*$/);
-   if(m){const n=Number(m[1]);if(n>=1&&n<=999) values.push(n);continue;}
-   if(/^[0-9\s,]+$/.test(cleaned)){
-     const tokens=cleaned.split(/[\s,]+/).filter(Boolean);
+   if(/^(?:عدد|دست|بسته|کارتن|مقدار|تعداد)$/i.test(line)) continue;
+   // Never split formatted prices such as 2,737,000 into fake quantities 2 and 737.
+   if(/\d{1,3}(?:,\d{3})+/.test(line)) continue;
+   const single=line.match(/^([0-9]{1,3})\s*(?:عدد)?\s*$/);
+   if(single){const n=Number(single[1]);if(n>=1&&n<=999) values.push(n);continue;}
+   // Accept multiple quantities only when separated by spaces/pipes, never thousands commas.
+   const cleaned=line.replace(/[|│¦;]/g,' ').trim();
+   if(/^[0-9\s]+$/.test(cleaned)){
+     const tokens=cleaned.split(/\s+/).filter(Boolean);
      for(const t of tokens){
        if(values.length>=expectedCount) break;
        if(/^\d{1,3}$/.test(t)){const n=Number(t);if(n>=1&&n<=999)values.push(n);}
      }
    }
  }
- return {values,reason:values.length===expectedCount?'تعدادها از بلوک ستون مقدار استخراج شدند.':`از ${expectedCount} تعداد مورد انتظار، فقط ${values.length} مقدار مستقل پیدا شد.`};
+ return {values,reason:values.length===expectedCount?'تعدادها از بلوک متنی ستون مقدار استخراج شدند.':`از ${expectedCount} تعداد مورد انتظار، فقط ${values.length} مقدار مستقل پیدا شد.`};
+}
+function extractPrePriceQuantityRun(text, expectedCount, total){
+ const lines=String(text||'').split(/\r?\n/).map(x=>norm(x));
+ const firstPrice=lines.findIndex(x=>/\d{1,3}(?:,\d{3})+/.test(x));
+ if(firstPrice<0) return [];
+ const nums=[];
+ for(let i=0;i<firstPrice;i++){
+   const s=lines[i];
+   if(/^\d{1,3}$/.test(s)){const n=Number(s);if(n>=1&&n<=999) nums.push({i,n});}
+ }
+ if(nums.length<expectedCount) return [];
+ // The OCR engine may emit the quantity column before the price column, separately from its headers.
+ // Only accept the final expectedCount small integers when their sum matches the printed total.
+ const vals=nums.slice(-expectedCount).map(x=>x.n);
+ if(total!==null && vals.reduce((a,b)=>a+b,0)!==total) return [];
+ return vals;
 }
 
 function findInvoiceProductRows(text, overlayLines){
  const lines=String(text||'').split(/\r?\n/).map((raw,index)=>({raw,s:norm(raw),index})).filter(x=>x.s);
- let headerIndex=lines.findIndex(x=>/کد\s*کالا|شرح\s*کالا/.test(x.s));
+ const headerIndex=lines.findIndex(x=>/کد\s*کالا|شرح\s*کالا|کد\s*کالا\s*یا\s*خدمات/.test(x.s));
  const region=headerIndex>=0?lines.filter(x=>x.index>=headerIndex):lines;
  const map=new Map();
- for(const line of region){
-   const lineDigits=digits(line.s);
-   for(const p of products){
-     const re=new RegExp('(^|[^0-9])'+String(p.code)+'([^0-9]|$)');
-     if(re.test(lineDigits) && !map.has(String(p.code))) map.set(String(p.code),{code:String(p.code),name:p.name,lineIndex:line.index,sourceLine:line.s,y:null});
+ const add=(rawCode,line)=>{
+   const code=digits(rawCode).replace(/[^0-9]/g,'');
+   const product=byCode.get(code);
+   if(!product || map.has(code)) return;
+   if(isBadContext(line.s) && !/کد\s*(?:کالا)?\s*[:：#-]?\s*\d/.test(line.s)) return;
+   map.set(code,{code:String(product.code),name:product.name,lineIndex:line.index,sourceLine:line.s,y:null,source:'text'});
+ };
+ for(let i=0;i<region.length;i++){
+   const line=region[i], s=line.s;
+   if(/کد\s*پستی|کد\s*اقتصادی/.test(s)) continue;
+   // First trust an explicitly labelled item code. Do not also treat numbers in its description as codes.
+   const labelled=[...s.matchAll(/کد\s*(?:کالا)?\s*[:：#-]?\s*([0-9]{2,8})/g)];
+   if(labelled.length){ for(const m of labelled) add(m[1],line); continue; }
+   const reverse=[...s.matchAll(/([0-9]{2,8})\s+کد(?:\s|$)/g)];
+   if(reverse.length){ for(const m of reverse) add(m[1],line); continue; }
+   // OCR often puts the code at the beginning of the product row; never match numbers inside the description.
+   const leading=s.match(/^([0-9]{2,8})(?=\s|$)/);
+   if(leading) { add(leading[1],line); continue; }
+   // Some OCR results split the code into a standalone line. Accept only exact bank codes in the item-table region.
+   if(/^\d{2,8}$/.test(s)){
+     const code=digits(s);
+     const next=region[i+1];
+     if(byCode.has(code) && next && !/^\d/.test(next.s) && !/(جمع|مبلغ|بهای|تخفیف|مالیات|توضیحات|تاریخ|شماره)/.test(next.s)) add(code,line);
    }
  }
- const overlay=(overlayLines||[]).flatMap((line,li)=>(line.words||[]).map(w=>{return {t:digits(w.text||'').replace(/[^0-9]/g,''),x:Number(w.left)||0,y:(Number(w.top)||0)+(Number(w.height)||0)/2,h:Number(w.height)||12,li};})).filter(w=>w.t);
+ const overlay=(overlayLines||[]).flatMap((line,li)=>(line.words||[]).map(w=>({t:digits(w.text||'').replace(/[^0-9]/g,''),x:Number(w.left)||0,y:(Number(w.top)||0)+(Number(w.height)||0)/2,h:Number(w.height)||12,li}))).filter(w=>w.t);
  const maxX=Math.max(1,...overlay.map(w=>w.x));
  const geoCodes=[];
  for(const w of overlay){
    const product=byCode.get(w.t);
-   if(product && w.x/maxX>=.72 && !geoCodes.some(x=>x.code===w.t)) geoCodes.push({code:w.t,name:product.name,lineIndex:w.li,sourceLine:'',y:w.y});
+   if(product && w.x/maxX>=.72 && !geoCodes.some(x=>x.code===w.t)) geoCodes.push({code:w.t,name:product.name,lineIndex:w.li,sourceLine:'',y:w.y,source:'overlay'});
  }
- if(geoCodes.length){
-   geoCodes.sort((a,b)=>a.y-b.y);
-   const seen=new Set(geoCodes.map(x=>x.code));
-   for(const row of map.values()) if(!seen.has(row.code)) geoCodes.push(row);
-   return {rows:geoCodes,overlay,maxX,usedOverlay:true};
+ // Keep only anchored text matches. Never append every bank code that happens to appear in a description (e.g. 131 in Pride 131).
+ let rows=[...map.values()].sort((a,b)=>a.lineIndex-b.lineIndex);
+ if(!rows.length && geoCodes.length) rows=geoCodes.sort((a,b)=>a.y-b.y);
+ else if(rows.length && geoCodes.length){
+   const geoByCode=new Map(geoCodes.map(r=>[r.code,r]));
+   rows=rows.map(r=>({...r,y:geoByCode.has(r.code)?geoByCode.get(r.code).y:null}));
  }
- return {rows:[...map.values()].sort((a,b)=>a.lineIndex-b.lineIndex),overlay,maxX,usedOverlay:false};
+ return {rows,overlay,maxX,usedOverlay:rows.some(r=>Number.isFinite(r.y))};
 }
 function readInvoiceTotalQuantity(text){
  const lines=String(text||'').split(/\r?\n/).map(norm);
@@ -298,14 +360,30 @@ function extractItemsFromText(text, overlayLines){
  const found=findInvoiceProductRows(text,overlayLines);
  const rows=found.rows;
  if(!rows.length) return [];
- const geomQty=quantitiesFromOverlay(rows,found.overlay,found.maxX);
  const total=readInvoiceTotalQuantity(text);
- let quantities=geomQty;
- const allValid=quantities.length===rows.length && quantities.every(q=>Number.isInteger(q)&&q>0);
- if(!allValid || (total!==null && quantities.reduce((a,b)=>a+b,0)!==total)) quantities=rows.map(()=>null);
- return rows.map((r,i)=>({code:r.code,name:r.name,qty:quantities[i]??null,confidence:quantities[i]!=null?'high':'low',source:quantities[i]!=null?'تعداد از موقعیت ستون مقدار خوانده و با جمع فاکتور کنترل شد':'کد از بانک محصول شناسایی شد؛ تعداد برای جلوگیری از اشتباه نیاز به ورود/تأیید دستی دارد'}));
+ const geomQty=quantitiesFromOverlay(rows,found.overlay,found.maxX);
+ const geomValid=geomQty.length===rows.length && geomQty.every(q=>Number.isInteger(q)&&q>0) && (total===null || geomQty.reduce((a,b)=>a+b,0)===total);
+ let quantities=geomValid?geomQty:null;
+ let quantitySource=geomValid?'موقعیت ستون مقدار':null;
+ let confidence=geomValid?'high':null;
+ // Fallback to OCR's plain-text quantity column only when it yields exactly one value per anchored product row.
+ if(!quantities){
+   const block=extractQuantityColumnBlock(text,rows.length);
+   const vals=block.values;
+   const valid=vals.length===rows.length && vals.every(q=>Number.isInteger(q)&&q>0) && (total===null || vals.reduce((a,b)=>a+b,0)===total);
+   if(valid){ quantities=vals; quantitySource='بلوک متنی ستون مقدار'; confidence=total===null?'medium':'high'; }
+ }
+ if(!quantities){
+   const vals=extractPrePriceQuantityRun(text,rows.length,total);
+   if(vals.length===rows.length){ quantities=vals; quantitySource='بلوک تعداد قبل از ستون قیمت'; confidence=total===null?'medium':'high'; }
+ }
+ if(!quantities) quantities=rows.map(()=>null);
+ return rows.map((r,i)=>({
+   code:r.code,name:r.name,qty:quantities[i]??null,
+   confidence:quantities[i]!=null?confidence:'low',
+   source:quantities[i]!=null?`${quantitySource}${total!==null?'؛ کنترل با جمع کل':'؛ جمع کل در متن قابل تشخیص نبود'}`:'کد کالا شناسایی شد؛ تعداد از OCR قابل تأیید نبود و باید دستی بررسی شود'
+ }));
 }
-
 function extractTable(overlay){
  const ws=(overlay||[]).flatMap(l=>(l.words||[]).map(w=>({t:norm(w.text||''),x:+w.left||0,y:(+w.top||0)+(+w.height||0)/2,h:+w.height||14}))).filter(w=>w.t);
  const maxX=Math.max(1,...ws.map(w=>w.x)); const codes=[];

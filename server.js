@@ -3,6 +3,7 @@ const multer = require("multer");
 const FormData = require("form-data");
 const fetch = require("node-fetch");
 const path = require("path");
+const XLSX = require("xlsx");
 
 const app = express();
 const upload = multer({
@@ -17,6 +18,47 @@ const ORDERS = new Map();
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+
+// Import invoice spreadsheets directly; do not send Excel files through OCR.
+app.post("/api/import-invoice", upload.single("file"), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ok:false,error:"فایل اکسل انتخاب نشده است."});
+    const ext = path.extname(req.file.originalname || "").toLowerCase();
+    if (![".xls", ".xlsx", ".xlsm"].includes(ext)) return res.status(400).json({ok:false,error:"فقط فایل اکسل XLS یا XLSX قابل قبول است."});
+    const book = XLSX.read(req.file.buffer, {type:"buffer", cellDates:false});
+    let found = null, invoiceNo = "", invoiceDate = "";
+    const norm = v => String(v ?? "").replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[يى]/g,"ی").replace(/ك/g,"ک").replace(/\u200c/g," ").replace(/\s+/g," ").trim().toLowerCase();
+    const codeHeads = /^(کد کالا|کد محصول|کد|کد کالا یا خدمات|شناسه کالا|product code|item code)$|^کد کالا( یا)?$/;
+    const nameHeads = /^(شرح کالا|نام کالا|شرح|شرح محصول|نام محصول|کالا|شرح کالا یا خدمات|توضیحات|description|item name|product)$|^شرح کالا( یا خدمات)?$/;
+    const qtyHeads = /^(مقدار|تعداد|مقدار کل|تعداد کل|qty|quantity)$/;
+    for (const sheetName of book.SheetNames) {
+      const rows = XLSX.utils.sheet_to_json(book.Sheets[sheetName], {header:1, defval:"", raw:false});
+      for (let ri=0; ri<Math.min(rows.length,80); ri++) {
+        const cells=(rows[ri]||[]).map(norm);
+        let ci=-1, ni=-1, qi=-1;
+        cells.forEach((v,i)=>{if(codeHeads.test(v) || (/کد/.test(v) && /کالا/.test(v)))ci=i;if(nameHeads.test(v) || (/شرح/.test(v) && /کالا/.test(v)))ni=i;if(qtyHeads.test(v) || v.startsWith("مقدار"))qi=i;});
+        if(ci>=0 && qi>=0 && (ni>=0 || cells.some(v=>/شرح|نام کالا/.test(v)))) { found={rows,headerRow:ri,codeCol:ci,nameCol:ni,qtyCol:qi,sheetName}; break; }
+      }
+      if(found) break;
+    }
+    // Also collect invoice metadata from label/value pairs.
+    for(const sn of book.SheetNames){const rows=XLSX.utils.sheet_to_json(book.Sheets[sn],{header:1,defval:"",raw:false});for(const row of rows.slice(0,15)){const line=row.map(v=>String(v??"")).join(" ");const m=line.match(/(?:شماره\s*فاکتور|شماره\s*سند)\s*[:：]?\s*([0-9۰-۹]+)/);if(m)invoiceNo=m[1];const d=line.match(/(?:تاریخ\s*فاکتور|تاریخ)\s*[:：]?\s*([0-9۰-۹]{4}[\/\-][0-9۰-۹]{1,2}[\/\-][0-9۰-۹]{1,2})/);if(d)invoiceDate=d[1];}}
+    if(!found) return res.status(422).json({ok:false,error:"سرستون‌های کد کالا، شرح کالا و مقدار در فایل پیدا نشد. لطفاً نمونه فایل را برای تنظیم قالب بفرست.",sheets:book.SheetNames});
+    const items=[];
+    for(const row of found.rows.slice(found.headerRow+1)){
+      const code=norm(row[found.codeCol]).replace(/[,،\s]/g,"");
+      const name=found.nameCol>=0?String(row[found.nameCol]??"").trim():"";
+      const qraw=norm(row[found.qtyCol]).replace(/[,،]/g,"");
+      const qty=Number(qraw.replace(/[^0-9.\-]/g,""));
+      if(!code || !/^[0-9]+$/.test(code) || !Number.isFinite(qty) || qty<=0) continue;
+      if(/^(جمع|مجموع|تعداد|مقدار|کد)$/.test(norm(name))) continue;
+      items.push({code,name,qty});
+    }
+    if(!items.length) return res.status(422).json({ok:false,error:"سرستون پیدا شد، اما ردیف کالای معتبر استخراج نشد.",sheet:found.sheetName});
+    res.json({ok:true,invoiceNo,invoiceDate,sheet:found.sheetName,items,totalQty:items.reduce((a,x)=>a+x.qty,0),source:"excel"});
+  } catch(e) { console.error("Excel import failed",e); res.status(400).json({ok:false,error:"خواندن فایل اکسل ناموفق بود: "+e.message}); }
+});
 
 
 app.post("/api/orders", (req,res)=>{
