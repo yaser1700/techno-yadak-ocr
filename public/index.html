@@ -114,6 +114,7 @@ input,button,select,textarea{max-width:100%;min-width:0}
     <input id="labelPhoto" type="file" accept="image/*" capture="environment" style="margin-top:8px">
     <button id="readLabelQty" class="secondary" type="button" style="width:100%;margin-top:8px">🔎 خواندن تعداد از عکس لیبل</button>
     <div id="labelQtyStatus" class="status wait hidden"></div>
+    <details id="labelRawDetails" class="hidden" style="margin-top:8px"><summary>متن خام خوانده‌شده از لیبل</summary><pre id="labelRawText" style="white-space:pre-wrap;line-height:1.8;background:#fff;border-radius:8px;padding:10px;max-height:220px;overflow:auto"></pre></details>
   </div>
   <div id="barcodeScannerPanel" class="card hidden" style="padding:12px;margin-top:10px"><div id="barcodeReader" style="width:100%;max-width:100%;overflow:hidden"></div><div id="barcodeScannerStatus" class="status wait">در حال آماده‌سازی دوربین…</div><button id="stopBarcodeCamera" type="button" class="danger" style="width:100%;margin-top:8px">بستن دوربین</button></div>
   <button id="addScan" class="secondary" style="width:100%;margin-top:8px">➕ ثبت بسته اسکن‌شده</button>
@@ -146,8 +147,8 @@ let lastFile=null,lastText="",currentItems=[],busy=false;
 $("picker").value=localStorage.getItem("techno_picker_name")||"";
 $("picker").addEventListener("change",()=>localStorage.setItem("techno_picker_name",$("picker").value.trim()));
 $("cameraBtn").onclick=()=>$("camera").click();
-$("camera").addEventListener("change",()=>{if($("camera").files[0]){$("invoice").value="";lastFile=$("camera").files[0];renderSelectedFile(lastFile)}});
-$("invoice").addEventListener("change",()=>{lastFile=$("invoice").files[0]||null;renderSelectedFile(lastFile)});
+$("camera").addEventListener("change",()=>{if($("camera").files[0]){$("invoice").value="";$("customerName").value="";lastFile=$("camera").files[0];renderSelectedFile(lastFile)}});
+$("invoice").addEventListener("change",()=>{lastFile=$("invoice").files[0]||null;$("customerName").value="";renderSelectedFile(lastFile)});
 function renderSelectedFile(f){if(!f){$("preview").classList.add("hidden");return;} $("info").textContent=`${f.name} — ${(f.size/1024/1024).toFixed(2)} MB`; if(f.type.startsWith("image/")){const u=URL.createObjectURL(f);$("preview").src=u;$("preview").classList.remove("hidden");}else{$("preview").classList.add("hidden");}}
 
 function normalizeExcelCode(s){return norm(s).replace(/[,،\s]/g,"")}
@@ -469,6 +470,87 @@ function extractInvoiceNumber(text){
  return "";
 }
 
+function cleanCustomerCandidate(value){
+ let s=String(value||"").replace(/[يى]/g,"ی").replace(/ك/g,"ک").replace(/ـ/g,"").replace(/[|¦]/g," ").replace(/[\u200c\u00a0]/g," ").replace(/\s+/g," ").trim();
+ s=s.replace(/(?:نام\s*(?:خریدار|مشتری)|مشخصات\s*(?:خریدار|مشتری)|شماره\s*اقتصادی|کد\s*پستی|نشانی|آدرس|تلفن|همراه|نمابر|فروشنده|خریدار|مشتری|فاکتور|صورتحساب|وب\s*سایت|www|https?:).*/i,"").trim();
+ s=s.replace(/^[：:؛,،.\-_=]+|[：:؛,،.\-_=]+$/g,"").trim();
+ return s.length<=80?s:"";
+}
+function extractCustomerNameFromOCR(text){
+ const normalizeLine = value => String(value||"").replace(/[يى]/g,"ی").replace(/ك/g,"ک").replace(/ـ/g,"").replace(/[\u200c\u00a0]/g," ").replace(/[|¦]/g," ").replace(/\s+/g," ").trim();
+ const lines=String(text||"").replace(/\r/g,"\n").split(/\n+/).map(normalizeLine).filter(Boolean);
+ const titleRe=/(?:جناب\s*(?:آقای|اقای|آقاى|آقاي|آقا)|سرکار\s*(?:خانم|خاتون)|آقای|اقای|آقاى|آقاي|خانم)\s*[:：،\-]?\s*([^\n]{1,90})/i;
+ const buyerRe=/نام\s*خری\s*دار|نام\s*(?:مشتری|خریدار)|مشخصات\s*(?:خریدار|مشتری)|خریدار\s*:/i;
+ const badRe=/(?:تکنو\s*یدک|گروه\s*تولیدی|فروشنده|خیابان|بلوار|نشانی|آدرس|کد\s*پستی|شماره\s*اقتصادی|تلفن|همراه|نمابر|وب\s*سایت|www|https?:|شماره\s*فاکتور|صورتحساب)/i;
+ const hasLetters = s => /[آ-یA-Za-z]{2,}/.test(s||"");
+ const goodCandidate=(raw, allowNoTitle=false)=>{
+   let s=cleanCustomerCandidate(raw);
+   if(!s || s.length<2 || badRe.test(s) || !hasLetters(s)) return "";
+   // Reject phone-like or numeric values, while allowing codes in a branch name such as parentheses.
+   const digits=(s.match(/[0-9۰-۹٠-٩]/g)||[]).length;
+   if(digits>Math.max(3,Math.ceil(s.length*.25))) return "";
+   if(/^(?:شماره|کد|تلفن|نشانی|آدرس|فروشنده|خریدار|مشتری|تاریخ|مبلغ)/i.test(s)) return "";
+   if(!allowNoTitle && !/(?:جناب|سرکار|آقای|اقای|آقا|خانم)/.test(s)) return "";
+   return s.replace(/\s*\(\s*/g," (").replace(/\s*\)/g,")").replace(/\s+/g," ").trim();
+ };
+ // Highest confidence: honorific near the buyer-name label.
+ const buyerIndices=[];
+ lines.forEach((l,i)=>{if(buyerRe.test(l))buyerIndices.push(i)});
+ const nearby=[];
+ for(const bi of buyerIndices){
+   for(let d=0;d<=3;d++){
+     const inds=d===0?[bi]:[bi-d,bi+d];
+     for(const idx of inds) if(idx>=0&&idx<lines.length) nearby.push({line:lines[idx],distance:d,anchor:bi});
+   }
+ }
+ for(const rec of [...nearby.map(x=>x.line),...lines]){
+   const m=rec.match(titleRe); if(!m) continue;
+   const title=rec.match(/(?:جناب\s*(?:آقای|اقای|آقاى|آقاي|آقا)|سرکار\s*(?:خانم|خاتون)|آقای|اقای|آقاى|آقاي|خانم)/i)?.[0]||"";
+   const tail=cleanCustomerCandidate(m[1]);
+   const candidate=goodCandidate(`${title} ${tail}`);
+   if(candidate) return candidate;
+ }
+ // Some OCR layouts put the buyer name and the label in adjacent columns/lines,
+ // or omit the honorific. Only use a short candidate next to an explicit buyer label.
+ for(const bi of buyerIndices){
+   const sameLine=lines[bi].replace(buyerRe," ").replace(/\bخریدار\b/g," ").replace(/[:：]/g," ");
+   const same=goodCandidate(sameLine,true); if(same) return same;
+   for(const idx of [bi-1,bi+1,bi-2,bi+2]){
+     if(idx<0||idx>=lines.length) continue;
+     const line=lines[idx];
+     if(badRe.test(line)) continue;
+     const candidate=goodCandidate(line,true);
+     // Avoid accepting generic labels, addresses and long OCR fragments as a customer.
+     if(candidate && candidate.split(/\s+/).length<=6 && candidate.length<=55) return candidate;
+   }
+ }
+ // Legacy invoices often print an honorific without a readable buyer label.
+ for(const line of lines){
+   const m=line.match(titleRe);if(!m)continue;
+   const title=line.match(/(?:جناب\s*(?:آقای|اقای|آقاى|آقاي|آقا)|سرکار\s*(?:خانم|خاتون)|آقای|اقای|آقاى|آقاي|خانم)/i)?.[0]||"";
+   const candidate=goodCandidate(`${title} ${cleanCustomerCandidate(m[1])}`);
+   if(candidate) return candidate;
+ }
+ return "";
+}
+function parsePackageQuantityFromOCR(text){
+ const s=String(text||"")
+   .replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d))
+   .replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d))
+   .replace(/[يى]/g,"ی").replace(/ك/g,"ک").replace(/[×✕]/g,"x")
+   .replace(/[：]/g,":").replace(/[\u00a0\u200c]/g," ")
+   .replace(/\s+/g," ").trim();
+ const patterns=[
+   /(?:تعداد\s*(?:(?:داخل|در)\s*بسته)?|تعداد\s*بسته|مقدار\s*بسته|qty(?:\s*(?:per|\/)?\s*pack)?|quantity|pack\s*(?:qty|size)|pcs?\s*(?:per|\/)\s*pack)\s*[:=#\-]?\s*(?:عدد|pcs?\s*)?(\d{1,4})/i,
+   /(?:بسته|کارتن)\s*(?:شامل|دارای|تعداد)?\s*[:=#\-]?\s*(\d{1,4})\s*(?:عدد|قطعه|pcs?|pieces?)?/i,
+   /(?:^|[^\d])(\d{1,4})\s*(?:عدد|قطعه|pcs?|pieces?|units?|pc\.?|عددی)(?=$|[^a-z])/i,
+   /(?:^|[^\d])(\d{1,4})\s*(?:عدد|قطعه)\s*(?:در|داخل)\s*بسته/i,
+   /(?:pack|carton|ctn)\s*[:=#\-]?\s*(\d{1,4})/i
+ ];
+ for(const re of patterns){const m=s.match(re);if(m){const n=Number(m[1]);if(Number.isInteger(n)&&n>=1&&n<=9999)return n;}}
+ return null;
+}
+
 function renderItems(items){
  currentItems=items.map(x=>({...x}));
  $("resultCard").classList.remove("hidden");
@@ -519,9 +601,11 @@ async function runOCR(file){
  const d=await r.json().catch(()=>({ok:false,error:'پاسخ سرور قابل خواندن نیست.'}));
  if(!r.ok||!d.ok){throw new Error(d.error||'OCR ناموفق بود.');}
  $("bar").style.width='80%';lastText=d.text||'';$("raw").textContent=lastText||'(متن خالی)'; const detectedInvoice=extractInvoiceNumber(lastText); if(detectedInvoice && !$("invoiceNo").value) $("invoiceNo").value=detectedInvoice;
+ const detectedCustomer=extractCustomerNameFromOCR(lastText);
+ if(detectedCustomer) $("customerName").value=detectedCustomer;
  const items=extractItemsFromText(lastText,d.overlayLines);$("bar").style.width='100%';
- if(!items.length){setStatus('OCR انجام شد، اما هیچ کد معتبر از بانک ۱۸۶۴ محصول پیدا نشد. متن خام را بررسی کن.','err');$("resultCard").classList.add('hidden');return;}
- renderItems(items);setStatus(`OCR انجام شد؛ ${items.length} ردیف کددار پیدا شد. تعدادها را با تصویر فاکتور تطبیق بده.`,'wait');
+ if(!items.length){setStatus(`OCR انجام شد، اما هیچ کد معتبر از بانک ۱۸۶۴ محصول پیدا نشد. ${detectedCustomer?`نام مشتری: ${detectedCustomer}.`:"نام مشتری هم از متن OCR پیدا نشد؛ متن خام را باز کن و در صورت نیاز دستی وارد کن."}`,'err');$("resultCard").classList.add('hidden');return;}
+ renderItems(items);setStatus(`OCR انجام شد؛ ${items.length} ردیف کددار پیدا شد. ${detectedCustomer?`نام مشتری شناسایی شد: ${detectedCustomer}.`:"نام مشتری از متن OCR تشخیص داده نشد؛ آن را دستی وارد کن."} تعدادها را با تصویر فاکتور تطبیق بده.`,'wait');
 }
 
 $("invoice").addEventListener('change',()=>{const f=$("invoice").files[0];if(!f)return;lastFile=f;const u=URL.createObjectURL(f);$("preview").src=u;$("preview").classList.remove('hidden');});
@@ -607,27 +691,25 @@ $("runFinalCheck").onclick=async()=>{try{if(!checkOrder)throw new Error("ابت�
 <script>
 
 
-// Read explicit package quantity from a photo of the label using the existing Persian OCR endpoint.
-// Never silently assume 1; if OCR is ambiguous, ask the worker to type the quantity.
+// OCR package labels with dedicated non-table OCR settings, image compression and diagnostics.
 $("readLabelQty").addEventListener("click", async()=>{
  const f=$("labelPhoto").files[0], status=$("labelQtyStatus"), btn=$("readLabelQty");
- status.className="status wait";status.textContent="در حال خواندن عکس لیبل…";status.classList.remove("hidden");
+ status.className="status wait";status.textContent="در حال آماده‌سازی عکس لیبل…";status.classList.remove("hidden");
+ $("labelRawDetails").classList.add("hidden");$("labelRawText").textContent="";
  if(!f){status.className="status err";status.textContent="ابتدا از لیبل بسته عکس بگیر یا یک تصویر انتخاب کن.";return;}
  btn.disabled=true;
  try{
-   const fd=new FormData();fd.append("file",f);
-   const r=await fetch("/api/ocr",{method:"POST",body:fd});const d=await r.json();
-   if(!r.ok||!d.ok)throw new Error(d.error||"خواندن لیبل ناموفق بود.");
-   const text=norm(d.text||"");
-   const patterns=[
-     /(?:تعداد\s*(?:داخل\s*بسته)?|مقدار\s*بسته|تعداد\s*در\s*بسته|qty|quantity|pack\s*qty)\s*[:：=\-]?\s*([0-9]{1,4})/i,
-     /([0-9]{1,4})\s*(?:عدد\s*)?(?:داخل\s*بسته|در\s*بسته|عدد\s*در\s*بسته)/i,
-     /(?:بسته|کارتن)\s*[:：=\-]?\s*([0-9]{1,4})\s*عدد/i
-   ];
-   let q=null;for(const re of patterns){const m=text.match(re);if(m){const n=Number(m[1]);if(n>=1&&n<=9999){q=n;break;}}}
-   if(q!==null){$("scanQty").value=String(q);status.className="status ok";status.textContent=`تعداد پیشنهادی از روی لیبل: ${toFa(q)}. قبل از ثبت، با نوشته روی بسته تطبیق بده.`;}
-   else {status.className="status wait";status.textContent="OCR تعداد مشخصی مثل «۵ عدد» پیدا نکرد. تعداد روی لیبل را دستی وارد کن؛ حدس زده نشد.";}
- }catch(e){status.className="status err";status.textContent="خواندن لیبل انجام نشد: "+e.message;}
+   const small=await compressImage(f,900000);
+   const fd=new FormData();fd.append("mode","label");fd.append("file",small,small.name||"label.jpg");
+   status.textContent=`در حال خواندن لیبل با OCR غیرجدولی (${(small.size/1024).toFixed(0)} KB)…`;
+   const r=await fetch("/api/ocr",{method:"POST",body:fd});
+   const d=await r.json().catch(()=>({ok:false,error:`پاسخ سرویس قابل خواندن نیست (HTTP ${r.status}).`}));
+   if(!r.ok||!d.ok)throw new Error(d.error||`خطای OCR (HTTP ${r.status})`);
+   const text=String(d.text||"");$("labelRawText").textContent=text||"متنی از لیبل خوانده نشد.";$("labelRawDetails").classList.remove("hidden");
+   const q=parsePackageQuantityFromOCR(text);
+   if(q!==null){$("scanQty").value=String(q);status.className="status ok";status.textContent=`تعداد پیشنهادی از لیبل: ${toFa(q)}. قبل از ثبت، آن را با نوشته روی بسته تطبیق بده.`;}
+   else {status.className="status wait";status.textContent=`عکس پردازش شد، اما تعداد بسته به‌صورت واضح تشخیص داده نشد (متن ${text.length} نویسه). متن خام پایین را بررسی کن؛ تعداد را دستی وارد کن تا عدد اشتباه ثبت نشود.`;}
+ }catch(e){status.className="status err";status.textContent="خواندن لیبل ناموفق بود: "+(e?.message||String(e));}
  finally{btn.disabled=false;}
 });
 

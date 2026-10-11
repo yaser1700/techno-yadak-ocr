@@ -89,6 +89,36 @@ function safeProviderSummary(data) {
   };
 }
 
+async function requestOcrProvider(file, engine, isLabel) {
+  const form = new FormData();
+  form.append("language", "per");
+  form.append("OCREngine", String(engine));
+  form.append("isTable", isLabel ? "false" : "true");
+  form.append("detectOrientation", "true");
+  form.append("scale", "true");
+  form.append("isOverlayRequired", isLabel ? "false" : "true");
+  form.append("file", file.buffer, { filename:file.originalname || (isLabel ? "label.jpg" : "invoice.jpg"), contentType:file.mimetype || "image/jpeg" });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  let response, raw;
+  try {
+    response = await fetch(OCR_URL, { method:"POST", headers:{...form.getHeaders(), apikey:OCR_API_KEY}, body:form, signal:controller.signal });
+    raw = await response.text();
+  } finally { clearTimeout(timer); }
+  let data;
+  try { data = JSON.parse(raw); }
+  catch (_) { return {response, raw, data:null, engine, parseError:true}; }
+  const parsed = Array.isArray(data.ParsedResults) ? data.ParsedResults : [];
+  const text = parsed.map(x => x.ParsedText || "").join("\n").trim();
+  return {response, raw, data, parsed, text, engine, parseError:false};
+}
+
+function providerErrorText(data) {
+  if (!data) return "";
+  const flatten = v => Array.isArray(v) ? v.map(flatten).filter(Boolean).join("؛ ") : (v == null ? "" : String(v).trim());
+  return [flatten(data.ErrorMessage), flatten(data.ErrorDetails)].filter(Boolean).join(" — ");
+}
+
 app.post("/api/ocr", upload.single("file"), async (req, res) => {
   const started = Date.now();
   try {
@@ -97,35 +127,29 @@ app.post("/api/ocr", upload.single("file"), async (req, res) => {
     if (!req.file?.buffer?.length) return res.status(400).json({ ok:false, error:"فایل تصویر دریافت نشد.", debugCode:"NO_FILE" });
     if (req.file.size > 10 * 1024 * 1024) return res.status(413).json({ ok:false, error:"حجم فایل بیشتر از ۱۰ مگابایت است.", debugCode:"FILE_OVER_10MB", bytes:req.file.size });
 
-    const form = new FormData();
-    form.append("language", "per");
-    form.append("OCREngine", "3");
-    form.append("isTable", "true");
-    form.append("detectOrientation", "true");
-    form.append("scale", "true");
-    form.append("isOverlayRequired", "true");
-    form.append("file", req.file.buffer, { filename:req.file.originalname || "invoice.jpg", contentType:req.file.mimetype || "image/jpeg" });
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60000);
-    let response;
-    try {
-      response = await fetch(OCR_URL, { method:"POST", headers:{...form.getHeaders(), apikey:OCR_API_KEY}, body:form, signal:controller.signal });
-    } finally { clearTimeout(timer); }
-
-    const raw = await response.text();
-    console.log("[OCR] provider HTTP status", response.status);
-    console.log("[OCR] provider raw response", raw.slice(0, 4000));
-    let data;
-    try { data = JSON.parse(raw); } catch (_) {
-      return res.status(502).json({ ok:false, error:"OCR.space پاسخ JSON معتبر برنگرداند.", debugCode:"PROVIDER_INVALID_JSON", providerStatus:response.status, providerRawPreview:raw.slice(0,1200) });
+    const isLabel = String(req.body?.mode || "") === "label";
+    let result = await requestOcrProvider(req.file, isLabel ? 2 : 3, isLabel);
+    let fallbackUsed = false;
+    // Label text is small; if Engine 2 returns no text, retry once with Engine 1.
+    // Do not retry authentication, quota, or HTTP failures because those will not improve by changing engines.
+    if (isLabel && result.response.ok && !result.parseError && !result.text && !/quota|apikey|api key|credits|limit/i.test(providerErrorText(result.data))) {
+      console.warn("[OCR] label engine 2 returned no text; retrying with engine 1");
+      result = await requestOcrProvider(req.file, 1, true);
+      fallbackUsed = true;
     }
-    const provider = safeProviderSummary(data);
-    if (!response.ok) return res.status(502).json({ ok:false, error:`OCR.space خطای HTTP ${response.status} برگرداند.`, debugCode:"PROVIDER_HTTP_ERROR", providerStatus:response.status, provider });
-    if (data.IsErroredOnProcessing) return res.status(422).json({ ok:false, error:"OCR.space تصویر را پردازش نکرد.", debugCode:"PROVIDER_PROCESSING_ERROR", providerStatus:response.status, provider });
 
-    const parsed = Array.isArray(data.ParsedResults) ? data.ParsedResults : [];
-    const text = parsed.map(x => x.ParsedText || "").join("\n");
+    console.log("[OCR] provider HTTP status", result.response.status, "engine", result.engine, "fallback", fallbackUsed);
+    console.log("[OCR] provider raw response", String(result.raw || "").slice(0, 4000));
+    if (result.parseError) {
+      return res.status(502).json({ ok:false, error:"OCR.space پاسخ JSON معتبر برنگرداند.", debugCode:"PROVIDER_INVALID_JSON", providerStatus:result.response.status, providerRawPreview:String(result.raw || "").slice(0,1200) });
+    }
+    const data = result.data || {};
+    const provider = {...safeProviderSummary(data), engineUsed:result.engine, fallbackUsed};
+    if (!result.response.ok) return res.status(502).json({ ok:false, error:`OCR.space خطای HTTP ${result.response.status} برگرداند.${providerErrorText(data) ? " "+providerErrorText(data) : ""}`, debugCode:"PROVIDER_HTTP_ERROR", providerStatus:result.response.status, provider });
+    if (data.IsErroredOnProcessing) return res.status(422).json({ ok:false, error:`OCR.space تصویر را پردازش نکرد.${providerErrorText(data) ? " "+providerErrorText(data) : ""}`, debugCode:"PROVIDER_PROCESSING_ERROR", providerStatus:result.response.status, provider });
+
+    const parsed = result.parsed || [];
+    const text = result.text || "";
     const overlayLines = parsed.flatMap((x, pageIndex) => {
       const lines = x?.TextOverlay?.Lines || [];
       return lines.map(line => ({
@@ -134,8 +158,8 @@ app.post("/api/ocr", upload.single("file"), async (req, res) => {
         words: (line.Words || []).map(w => ({ text:w.WordText || "", left:w.Left, top:w.Top, width:w.Width, height:w.Height }))
       }));
     });
-    console.log("[OCR] success", { parsedResults:parsed.length, textLength:text.length, overlayLines:overlayLines.length, elapsedMs:Date.now()-started });
-    return res.json({ ok:true, text, overlayLines, provider:{ocrExitCode:data.OCRExitCode, processingTimeInMilliseconds:data.ProcessingTimeInMilliseconds, parsedResults:parsed.length} });
+    console.log("[OCR] success", { mode:isLabel ? "label" : "invoice", engine:result.engine, fallbackUsed, parsedResults:parsed.length, textLength:text.length, overlayLines:overlayLines.length, elapsedMs:Date.now()-started });
+    return res.json({ ok:true, text, overlayLines, provider:{ocrExitCode:data.OCRExitCode, processingTimeInMilliseconds:data.ProcessingTimeInMilliseconds, parsedResults:parsed.length, engineUsed:result.engine, fallbackUsed} });
   } catch (err) {
     console.error("[OCR] request exception", err);
     return res.status(500).json({ ok:false, error:err?.message || String(err), debugCode:err?.name === "AbortError" ? "PROVIDER_TIMEOUT" : "SERVER_EXCEPTION", elapsedMs:Date.now()-started });
