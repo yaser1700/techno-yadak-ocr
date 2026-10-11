@@ -7,6 +7,10 @@
 <style>
 *{box-sizing:border-box}body{margin:0;background:#eef2f7;color:#182230;font-family:Tahoma,Arial,sans-serif}.wrap{max-width:820px;margin:auto;padding:14px}.card{background:#fff;border-radius:22px;padding:18px;margin:12px 0;box-shadow:0 5px 22px #00000010}h1{font-size:23px;margin:0 0 6px}h2{font-size:18px;margin:0 0 12px}.muted{color:#667085;line-height:1.9}.badge{display:inline-block;padding:6px 10px;border-radius:99px;background:#edf2ff;color:#244ea5;font-size:12px;margin-top:8px}.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:140px}input[type=file]{width:100%;padding:12px;border:1px solid #d8dde6;border-radius:13px;background:#fff}button{border:0;border-radius:14px;padding:13px 16px;font-size:16px;font-weight:bold;cursor:pointer}.primary{background:#2867df;color:#fff;width:100%;margin-top:10px}.secondary{background:#edf2ff;color:#234da5}.danger{background:#ffe9e9;color:#9b2222}.status{padding:12px 14px;border-radius:14px;margin-top:12px;line-height:1.9}.ok{background:#e9f8ef;color:#146b37}.err{background:#ffe9e9;color:#9a2020}.wait{background:#fff4df;color:#875700}.hidden{display:none}.tableWrap{overflow:auto}table{width:100%;border-collapse:collapse;margin-top:10px;min-width:600px}th,td{padding:10px;border-bottom:1px solid #eceff3;text-align:right;vertical-align:middle}th{background:#f7f8fa}.code{font-weight:bold;direction:ltr;text-align:right}.qty{width:90px;padding:9px;border:1px solid #cfd6df;border-radius:10px;font-size:16px}.warn{color:#9a5b00;font-size:12px;display:block;margin-top:4px}.good{color:#146b37}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.sum{background:#f7f8fa;border-radius:14px;padding:12px;text-align:center}.sum b{display:block;font-size:20px;margin-bottom:4px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.actions button{flex:1;min-width:140px}.preview{width:100%;max-height:360px;object-fit:contain;border-radius:14px;background:#f5f6f8;margin-top:10px}.small{font-size:12px;color:#667085}.progress{height:7px;background:#e7eaf0;border-radius:99px;overflow:hidden;margin-top:10px}.progress>div{height:100%;width:0;background:#2867df;transition:width .3s}.picker{padding:12px;border:1px solid #d8dde6;border-radius:13px;width:100%;font-size:16px}
 
+/* Cleaner mobile-first workflow */
+.stepnav{position:sticky;top:0;z-index:20;display:flex;gap:8px;justify-content:space-between;padding:8px;margin:0 0 10px;background:#eef2f7eF;backdrop-filter:blur(8px);border-radius:16px}
+.stepnav a{flex:1;text-align:center;text-decoration:none;font-size:13px;font-weight:bold;color:#234da5;background:#fff;border-radius:12px;padding:10px 4px;border:1px solid #e2e8f0}
+.card h2{line-height:1.6}.status{font-size:14px}.primary:disabled,button:disabled{opacity:.6;cursor:wait}
 /* Responsive mobile layout fix */
 html{width:100%;max-width:100%;overflow-x:hidden;-webkit-text-size-adjust:100%}
 body{width:100%;max-width:100%;overflow-x:hidden}
@@ -36,6 +40,7 @@ input,button,select,textarea{max-width:100%;min-width:0}
 </head>
 <body>
 <div class="wrap">
+<nav class="stepnav" aria-label="مراحل برنامه"><a href="#invoiceSection">۱ فاکتور</a><a href="#workerCard">۲ جمع‌آوری</a><a href="#finalCheckCard">۳ کنترل نهایی</a></nav>
 <div class="card">
   <h1>📦 کنترل جمع‌آوری سفارش</h1>
   <div class="muted">تکنو یدک پارت عباسی</div>
@@ -49,8 +54,8 @@ input,button,select,textarea{max-width:100%;min-width:0}
   <div class="small" style="margin-top:8px">فعلاً نام‌ها فقط روی همین دستگاه ذخیره می‌شوند. در نسخه چندنفره نهایی، مدیر از پنل خودش کارگران را ثبت می‌کند.</div>
 </div>
 
-<div class="card">
-  <h2>۲) مشخصات و عکس فاکتور</h2>
+<div class="card" id="invoiceSection">
+  <h2>۱) فاکتور و اطلاعات مشتری</h2>
   <input id="invoiceNo" class="picker" inputmode="numeric" placeholder="شماره فاکتور" style="margin-bottom:10px">
   <input id="customerName" class="picker" placeholder="نام مشتری / فروشگاه (از اکسل خودکار پر می‌شود)" style="margin-bottom:10px">
   <div class="row"><input id="invoice" type="file" accept="image/*,.pdf,application/pdf"><input id="camera" type="file" accept="image/*" capture="environment" style="display:none"><button id="cameraBtn" type="button" class="secondary">📷 عکس با دوربین</button></div><div class="small" style="margin-top:8px">برای عکس یا PDF از OCR استفاده کن؛ اگر فاکتور اکسل است، آن را از بخش زیر وارد کن تا تعدادها مستقیم از فایل خوانده شوند.</div><div class="card" style="background:#f7f9ff;margin-top:12px;padding:12px"><b>📊 ورود مستقیم فاکتور اکسل</b><input id="excelInvoice" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="margin-top:10px"><button id="importExcel" type="button" class="secondary" style="width:100%;margin-top:8px">📥 استخراج اقلام از اکسل (بدون OCR)</button><div class="small">فایل XLS و XLSX پشتیبانی می‌شود. قبل از ارسال سفارش، نتیجه را بازبینی کن.</div></div>
@@ -63,7 +68,7 @@ input,button,select,textarea{max-width:100%;min-width:0}
 </div>
 
 <div id="resultCard" class="card hidden">
-  <h2>۳) اقلام قابل جمع‌آوری</h2>
+  <h2>اقلام فاکتور</h2>
   <div id="resultNote" class="status wait"></div>
   <div class="summary">
     <div class="sum"><b id="countItems">۰</b>ردیف</div>
@@ -79,7 +84,7 @@ input,button,select,textarea{max-width:100%;min-width:0}
 </div>
 
 <div class="card" id="workerCard">
-  <h2>👷 ماموریت جمع‌آوری کارگر</h2>
+  <h2>۲) جمع‌آوری سفارش</h2>
   <div class="muted">کارگر می‌تواند کد مأموریت را وارد کند و بدون چاپ فاکتور، اقلام را روی گوشی تیک بزند.</div>
   <div class="row" style="margin-top:10px"><input id="orderCode" class="picker" placeholder="شماره فاکتور، مثلاً ۱۸۰۲۹"><button id="loadOrder" class="secondary">📥 دریافت مأموریت</button></div>
   <div id="workerStatus" class="status hidden"></div>
@@ -88,7 +93,7 @@ input,button,select,textarea{max-width:100%;min-width:0}
 </div>
 
 <div class="card" id="finalCheckCard">
-  <h2>🔎 کنترل نهایی بسته‌ها</h2>
+  <h2>۳) کنترل نهایی بسته‌ها</h2>
   <div class="muted">شماره فاکتور را وارد کن، سپس بارکد یا کد روی بسته را اسکن/وارد کن و تعداد واقعی همان بسته را ثبت کن. اگر لیبل تعداد داخل بسته دارد، آن مقدار را وارد کن؛ تعداد بسته از بانک کالا حدس زده نمی‌شود.</div>
   <div class="row" style="margin-top:10px"><input id="checkOrderCode" class="picker" placeholder="شماره فاکتور / مأموریت"><button id="loadCheckOrder" class="secondary">📥 بارگذاری فاکتور</button></div>
   <div id="checkOrderMeta" class="status wait hidden"></div>
@@ -122,7 +127,8 @@ input,button,select,textarea{max-width:100%;min-width:0}
 </div>
 </div>
 
-<script src="/products.js">
+<script src="/products.js"></script>
+<script>
 async function apiJson(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(opts.headers||{})},...opts});const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||`خطای سرور ${r.status}`);return d;}
 function renderWorkerOrder(o){
   const h=o.items.map(x=>`<div class="card" style="margin:8px 0;padding:12px"><div style="font-weight:bold">کد ${escapeHtml(x.code)}</div><div>${escapeHtml(x.name)}</div><div class="row" style="margin-top:8px"><label style="flex:1">تعداد فاکتور: <b>${toFa(x.expectedQty)}</b></label><input class="qty workerQty" data-i="${x.index}" type="number" min="0" value="${x.actualQty||x.expectedQty}"><label style="min-width:100px"><input class="workerCheck" data-i="${x.index}" type="checkbox" ${x.checked?'checked':''}> جمع شد</label></div></div>`).join('');
@@ -165,7 +171,7 @@ $("importExcel").onclick=async()=>{
   const fd=new FormData();fd.append("file",f);
   const r=await fetch("/api/import-invoice",{method:"POST",body:fd});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"خواندن اکسل ناموفق بود.");
   if(d.invoiceNo && !$("invoiceNo").value)$("invoiceNo").value=norm(d.invoiceNo);
-  if(d.customerName){$("customerName").value=d.customerName;}
+  if(d.customerName){$("customerName").value=d.customerName;} else { setStatus("اقلام اکسل خوانده شد، اما نام مشتری در سربرگ به‌طور قطعی پیدا نشد؛ برای جلوگیری از ثبت مشتری اشتباه، نام را بررسی کن.","wait"); }
   if(!$("invoiceNo").value)$("invoiceNo").value=f.name.replace(/\.(xls|xlsx|xlsm)$/i,"");
   lastFile=f;lastText=`ورود مستقیم اکسل: ${f.name}\nبرگه: ${d.sheet}\nشماره فاکتور: ${d.invoiceNo||""}\nنام مشتری استخراج‌شده: ${d.customerName||"تشخیص داده نشد"}\nتعداد ردیف: ${d.items.length}\nجمع تعداد: ${d.totalQty}`;$("raw").textContent=lastText;
   currentItems=d.items.map((it,i)=>{const product=byCode.get(normalizeExcelCode(it.code));return {code:normalizeExcelCode(it.code),name:product?.name||it.name||"شرح در بانک پیدا نشد",qty:Number(it.qty),confidence:product?"high":"medium",source:product?"مستقیم از اکسل؛ کد در بانک پیدا شد":"مستقیم از اکسل؛ کد در بانک پیدا نشد",index:i,bankMatch:Boolean(product),invoiceName:it.name||""};});
@@ -578,7 +584,7 @@ $("runFinalCheck").onclick=async()=>{try{if(!checkOrder)throw new Error("ابت�
  $("finalCheckResults").innerHTML=`<table style="min-width:520px"><thead><tr><th>کد</th><th>نام کالا</th><th>فاکتور</th><th>اسکن‌شده</th><th>اختلاف</th><th>وضعیت</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;}catch(e){$("finalCheck").className="status err";$("finalCheck").textContent=e.message;}};
 </script>
 
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
 <script>
 
 
@@ -620,27 +626,40 @@ async function stopBarcodeCamera() {
   document.getElementById('barcodeReader').innerHTML = '';
   barcodePanel.classList.add('hidden');
 }
-document.getElementById('openBarcodeCamera').addEventListener('click', async () => {
-  if (!window.isSecureContext) { alert('برای استفاده از دوربین، سایت باید با HTTPS باز شود.'); return; }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { alert('مرورگر اجازه دسترسی به دوربین را نمی‌دهد. سایت را در Chrome باز کن و مجوز دوربین را فعال کن.'); return; }
-  if (typeof Html5Qrcode === 'undefined') { alert('کتابخانه اسکن بارکد بارگذاری نشد. اینترنت/VPN را بررسی کن یا کد را دستی وارد کن.'); return; }
-  barcodePanel.classList.remove('hidden');
-  barcodeMessage('برای شروع اسکن، اجازه دسترسی دوربین را بده.');
-  try {
-    barcodeScannerInstance = new Html5Qrcode('barcodeReader', { verbose: false });
-    const config = { fps: 10, qrbox: (w,h) => ({ width: Math.max(180, Math.min(300, w-30)), height: Math.max(100, Math.min(180, h-30)) }), aspectRatio: 1.777 };
-    await barcodeScannerInstance.start({ facingMode: 'environment' }, config, async (decodedText) => {
-      const field = document.getElementById('scanCode');
-      field.value = String(decodedText || '').trim();
-      barcodeMessage('بارکد خوانده شد. تعداد واقعی بسته را بررسی کن و سپس «ثبت بسته اسکن‌شده» را بزن.', 'ok');
-      try { if (barcodeScannerInstance && barcodeScannerInstance.isScanning) await barcodeScannerInstance.stop(); } catch(e) {}
-      field.focus();
-    }, () => {});
-    barcodeMessage('دوربین فعال است؛ بارکد را داخل کادر نگه دار.');
-  } catch (e) {
-    const msg = String(e && e.message || e);
-    barcodeMessage('دوربین فعال نشد: ' + msg + ' — مجوز دوربین Chrome را بررسی کن.', 'err');
+let nativeStream = null, nativeScanTimer = null;
+async function stopBarcodeCamera() {
+  if(nativeScanTimer){clearInterval(nativeScanTimer);nativeScanTimer=null;}
+  if(nativeStream){nativeStream.getTracks().forEach(t=>t.stop());nativeStream=null;}
+  if (barcodeScannerInstance) {
+    try { if (barcodeScannerInstance.isScanning) await barcodeScannerInstance.stop(); } catch (e) {}
+    try { await barcodeScannerInstance.clear(); } catch (e) {}
+    barcodeScannerInstance = null;
   }
+  document.getElementById('barcodeReader').innerHTML = '';
+  barcodePanel.classList.add('hidden');
+}
+document.getElementById('openBarcodeCamera').addEventListener('click', async () => {
+  if (!window.isSecureContext) { barcodePanel.classList.remove('hidden'); barcodeMessage('برای دوربین باید سایت با HTTPS باز باشد.','err'); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { barcodePanel.classList.remove('hidden'); barcodeMessage('این مرورگر دسترسی دوربین را ارائه نمی‌کند؛ Chrome را باز کن و مجوز دوربین را فعال کن.','err'); return; }
+  barcodePanel.classList.remove('hidden');
+  const host=document.getElementById('barcodeReader');host.innerHTML='';
+  try {
+    // Prefer the native Android Chrome BarcodeDetector so scanning does not depend on a CDN.
+    if ('BarcodeDetector' in window) {
+      const detector=new BarcodeDetector({formats:['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','codabar','data_matrix']});
+      const video=document.createElement('video');video.setAttribute('playsinline','');video.autoplay=true;video.muted=true;video.style.cssText='width:100%;max-height:360px;border-radius:12px;background:#111';host.appendChild(video);
+      nativeStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});video.srcObject=nativeStream;await video.play();
+      barcodeMessage('دوربین فعال است؛ بارکد را داخل تصویر نگه دار.');
+      nativeScanTimer=setInterval(async()=>{try{if(video.readyState<2)return;const found=await detector.detect(video);if(found.length){document.getElementById('scanCode').value=String(found[0].rawValue||'').trim();barcodeMessage('بارکد خوانده شد. تعداد واقعی بسته را وارد و ثبت کن.','ok');await stopBarcodeCamera();document.getElementById('scanQty').focus();}}catch(e){}},350);
+      return;
+    }
+    if (typeof Html5Qrcode === 'undefined') throw new Error('اسکنر در این مرورگر پشتیبانی نمی‌شود یا کتابخانه بارگذاری نشده؛ کد را دستی وارد کن.');
+    barcodeScannerInstance = new Html5Qrcode('barcodeReader', { verbose: false });
+    await barcodeScannerInstance.start({ facingMode: 'environment' }, {fps:10,qrbox:{width:250,height:140}}, async decodedText=>{
+      document.getElementById('scanCode').value=String(decodedText||'').trim();barcodeMessage('بارکد خوانده شد. تعداد واقعی بسته را وارد و ثبت کن.','ok');await stopBarcodeCamera();document.getElementById('scanQty').focus();
+    },()=>{});
+    barcodeMessage('دوربین فعال است؛ بارکد را داخل کادر نگه دار.');
+  } catch (e) { barcodeMessage('اسکن شروع نشد: '+String(e?.message||e)+'؛ مجوز دوربین را بررسی کن یا کد را دستی وارد کن.','err'); }
 });
 document.getElementById('stopBarcodeCamera').addEventListener('click', stopBarcodeCamera);
 window.addEventListener('pagehide', () => { try { if (barcodeScannerInstance && barcodeScannerInstance.isScanning) barcodeScannerInstance.stop(); } catch(e) {} });

@@ -42,33 +42,46 @@ app.post("/api/import-invoice", upload.single("file"), (req, res) => {
       }
       if(found) break;
     }
-    // Extract invoice metadata robustly, including Iranian invoice templates where
-    // the customer name appears immediately before the "نام خریدار" header cell.
+    // Read metadata from the actual buyer/seller blocks. Prefer the value on the same row as
+    // the explicit buyer label; in this invoice template the name is in column K and label in X.
     const cleanMeta = v => String(v ?? "").replace(/ـ/g,"").replace(/[يى]/g,"ی").replace(/ك/g,"ک").replace(/\u200c/g," ").replace(/\s+/g," ").trim();
+    const normMeta = v => cleanMeta(v).toLowerCase().replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+    const isMetaLabel = v => /^(?:نام\s*(?:خریدار|مشتری|فروشنده)|مشخصات\s*(?:خریدار|مشتری)|خریدار|مشتری|فروشنده|شماره\s*اقتصادی|کد\s*پستی|نشانی|تلفن|همراه|نمابر|تاریخ|شماره\s*:?)\s*[:：]?$/i.test(normMeta(v));
+    const isLikelyPerson = v => {
+      const n=normMeta(v);
+      if(!n || isMetaLabel(n) || /^(تکنو\s*یدک|گروه\s*تولیدی|فروشنده)/.test(n)) return false;
+      if(/^(جناب\s*آقای|سرکار\s*خانم|آقای|خانم)\s*\S+/.test(n)) return true;
+      return /[آ-ی]/.test(n) && n.length>=4 && !/(خیابان|بلوار|نشانی|کد\s*پستی|شماره\s*اقتصادی|تلفن|همراه|نمابر|پرند\s*بلوار)/.test(n);
+    };
     for(const sn of book.SheetNames){
       const rows=XLSX.utils.sheet_to_json(book.Sheets[sn],{header:1,defval:"",raw:false});
-      for(const row of rows.slice(0,30)){
-        const vals=row.map(cleanMeta); const line=vals.join(" ");
+      for(let ri=0;ri<Math.min(rows.length,40);ri++){
+        const vals=(rows[ri]||[]).map(cleanMeta), line=vals.join(" ");
         const m=line.match(/(?:شماره\s*فاکتور|شماره\s*سند|شماره\s*[:：])\s*[:：]?\s*([0-9۰-۹]+)/);
-        if(m) invoiceNo=m[1];
+        if(m && !invoiceNo) invoiceNo=m[1];
         const d=line.match(/(?:تاریخ\s*فاکتور|تاریخ)\s*[:：]?\s*([0-9۰-۹]{4}[\/\-][0-9۰-۹]{1,2}[\/\-][0-9۰-۹]{1,2})/);
-        if(d) invoiceDate=d[1];
+        if(d && !invoiceDate) invoiceDate=d[1];
         if(!customerName){
-          // Header and value may be adjacent in either order on the same row.
-          const buyerIdx=vals.findIndex(v=>/نام\s*(?:مشتری|خریدار)|مشخصات\s*(?:مشتری|خریدار)|خریدار/.test(norm(v)));
-          if(buyerIdx>=0){
-            const before=vals.slice(0,buyerIdx).reverse().find(v=>v && !/^(شماره اقتصادی|کد پستی|نشانی|تلفن|همراه|نمابر|خریدار|مشتری)$/i.test(norm(v)));
-            const after=vals.slice(buyerIdx+1).find(v=>v && !/^(خریدار|مشتری|شماره اقتصادی|کد پستی|نشانی|تلفن|همراه|نمابر)$/i.test(norm(v)));
-            const candidate=[before,after].find(v=>v && !/^(نام|مشخصات|خریدار|مشتری)$/i.test(norm(v)));
-            if(candidate && !/^(تکنو یدک|گروه تولیدی|فروشنده)/.test(candidate)) customerName=candidate;
+          const buyerIndex=vals.findIndex(v=>/نام\s*(?:خریدار|مشتری)|مشخصات\s*(?:خریدار|مشتری)|خریدار/.test(normMeta(v)));
+          if(buyerIndex>=0){
+            // Search the entire row, not just the adjacent cell: merged Excel cells create gaps.
+            const candidates=vals.filter(isLikelyPerson);
+            const explicit=candidates.find(v=>/^(جناب\s*آقای|سرکار\s*خانم|آقای|خانم)/.test(normMeta(v)));
+            if(explicit) customerName=explicit;
+            else {
+              const left=vals.slice(0,buyerIndex).filter(isLikelyPerson);
+              const right=vals.slice(buyerIndex+1).filter(isLikelyPerson);
+              customerName=left[left.length-1]||right[0]||"";
+            }
           }
         }
         if(!customerName){
-          const candidate=vals.find(v=>/^(جناب\s*آقای|سرکار\s*خانم|آقای|خانم)\s*\S+/.test(v));
-          if(candidate) customerName=candidate;
+          const explicit=vals.find(v=>/^(جناب\s*آقای|سرکار\s*خانم|آقای|خانم)\s*\S+/.test(normMeta(v)));
+          if(explicit && !/^(تکنو\s*یدک|گروه\s*تولیدی)/.test(normMeta(explicit))) customerName=explicit;
         }
       }
     }
+    customerName=cleanMeta(customerName);
     if(!found) return res.status(422).json({ok:false,error:"سرستون‌های کد کالا، شرح کالا و مقدار در فایل پیدا نشد. لطفاً نمونه فایل را برای تنظیم قالب بفرست.",sheets:book.SheetNames});
     const items=[];
     for(const row of found.rows.slice(found.headerRow+1)){
