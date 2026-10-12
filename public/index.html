@@ -587,7 +587,7 @@ function parsePackageNameFromOCR(text){
      .replace(/\b(?:ATYP|PCS|QTY|QUANTITY)\b/ig," ")
      .replace(/[|¦]+/g," ").replace(/\s+/g," ").trim();
    if(!line || /تکنو\s*یدک|پارت\s*عباسی|تلفن|آدرس|نشانی|فاکتور|قیمت|مبلغ|بارکد|www|https?:/i.test(line)) continue;
-   if(!/[آ-ی]{3}/.test(line)) continue;
+   if((line.match(/[\u0600-\u06FF]/g)||[]).length<5) continue;
    const digits=(line.match(/[0-9۰-۹٠-٩]/g)||[]).length;
    if(digits>2) continue;
    if(line.length>=8 && line.length<=100 && !/^(?:تعداد|بسته|کارتن|شماره|کد)$/i.test(line)) candidates.push(line);
