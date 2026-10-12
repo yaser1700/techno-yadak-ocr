@@ -576,15 +576,23 @@ function extractCustomerNameFromOCR(text){
 function parsePackageNameFromOCR(text){
  const lines=String(text||"").replace(/[يى]/g,"ی").replace(/ك/g,"ک").replace(/[ـ\u200c\u00a0]/g," ").replace(/[|¦]/g," ").split(/\r?\n/)
    .map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
- const reject=/(تکنو\s*یدک|پارت\s*عباسی|تعداد|بسته|کارتن|کد\s*[:：]?|شماره|بارکد|تلفن|آدرس|نشانی|فاکتور|قیمت|مبلغ|pcs|qty|quantity|atyp|www|http)/i;
- const candidates=lines.filter(line=>{
-   if(reject.test(line)) return false;
-   if(!/[آ-ی]{3}/.test(line)) return false;
+ const candidates=[];
+ const reject=/تکنو\s*یدک|پارت\s*عباسی|تلفن|آدرس|نشانی|فاکتور|قیمت|مبلغ|بارکد|www|https?:/i;
+ for(const raw of lines){
+   if(reject.test(raw)) continue;
+   // OCR may place product name and pack count on the same line. Remove pack/count and label metadata first.
+   let line=raw
+     .replace(/(?:تعداد\s*(?:(?:داخل|در)\s*بسته)?|تعداد\s*بسته|مقدار\s*بسته|pack\s*qty|qty\s*per\s*pack)\s*[:：=#-]?\s*(?:عدد\s*)?[0-9۰-۹٠-٩]{1,4}\s*(?:عدد|قطعه|pcs?|pieces?)?/ig," ")
+     .replace(/(?:تعداد\s*(?:(?:داخل|در)\s*بسته)?|تعداد\s*بسته|مقدار\s*بسته|کد\s*کالا|کد|بارکد)\s*[:：=#-]?/ig," ")
+     .replace(/\b(?:ATYP|PCS|QTY|QUANTITY)\b/ig," ")
+     .replace(/[|¦]+/g," ").replace(/\s+/g," ").trim();
+   if(!line || /تکنو\s*یدک|پارت\s*عباسی|تلفن|آدرس|نشانی|فاکتور|قیمت|مبلغ|بارکد|www|https?:/i.test(line)) continue;
+   if(!/[آ-ی]{3}/.test(line)) continue;
    const digits=(line.match(/[0-9۰-۹٠-٩]/g)||[]).length;
-   if(digits>2) return false;
-   return line.length>=8 && line.length<=100;
- });
- // Prefer the longest clean Persian product-description line; never invent a name if OCR did not read one.
+   if(digits>2) continue;
+   if(line.length>=8 && line.length<=100 && !/^(?:تعداد|بسته|کارتن|شماره|کد)$/i.test(line)) candidates.push(line);
+ }
+ // Prefer a clean product description; return blank rather than guessing when OCR provides no candidate.
  candidates.sort((a,b)=>b.length-a.length);
  return candidates[0]||"";
 }
