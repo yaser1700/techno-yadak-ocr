@@ -29,7 +29,7 @@ const nameFnEnd = html.indexOf('function parsePackageQuantityFromOCR(text){', na
 assert.ok(nameFnStart >= 0 && nameFnEnd > nameFnStart, 'label product-name parser should exist in the UI');
 const nameFnSource = html.slice(nameFnStart, nameFnEnd);
 const parsePackageNameFromOCR = vm.runInNewContext(nameFnSource + '\nparsePackageNameFromOCR', {});
-assert.equal(parsePackageNameFromOCR('تکنو یدک پارت عباسی\\nسوکت سوزن نیسان دیزل و مهره سمند\\nتعداد در بسته ۵ عدد'), 'سوکت سوزن نیسان دیزل و مهره سمند');
+assert.equal(parsePackageNameFromOCR('تکنو یدک پارت عباسی\nسوکت سوزن نیسان دیزل و مهره سمند\nتعداد در بسته ۵ عدد'), 'سوکت سوزن نیسان دیزل و مهره سمند');
 assert.equal(parsePackageNameFromOCR('سوکت سوزن نیسان دیزل و مهره سمند تعداد در بسته ۵ عدد'), 'سوکت سوزن نیسان دیزل و مهره سمند');
 
 console.log('PASS: invoice number, package quantity, false-positive code rejection, table quantities, and label product name parsing');
