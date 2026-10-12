@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node server.js",
     "test:excel": "node tests/test-import.js",
-    "test": "node tests/test-import.js && node tests/test-import-real-layout.js && node tests/test-import-real-file.js"
+    "test:ocr": "node tests/test-ocr-parser.js",
+    "test": "node tests/test-import.js && node tests/test-import-real-layout.js && node tests/test-import-real-file.js && node tests/test-ocr-parser.js"
   },
   "dependencies": {
     "express": "^4.21.2",

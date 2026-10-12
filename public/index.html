@@ -109,8 +109,9 @@ input,button,select,textarea{max-width:100%;min-width:0}
   <div class="row" style="margin-top:10px"><input id="scanCode" class="picker" placeholder="کد / بارکد اسکن‌شده یا ورود دستی" autocomplete="off"><input id="scanQty" class="picker" type="number" min="1" value="" placeholder="تعداد واقعی روی لیبل (مثلاً ۵)"></div>
   <button id="openBarcodeCamera" class="secondary" type="button" style="width:100%;margin-top:8px">📷 اسکن بارکد با دوربین گوشی</button>
   <div class="card" style="padding:12px;margin-top:8px;background:#f7f9ff">
-    <b>خواندن تعداد از روی لیبل</b>
-    <div class="small">از برچسب بسته عکس بگیر یا تصویر آن را انتخاب کن. اگر عبارت تعداد مثل «۵ عدد» خوانده شود، مقدار پیشنهاد می‌شود؛ در غیر این صورت باید دستی تأیید کنی.</div>
+    <b>خواندن نام کالا و تعداد در بسته</b>
+    <div class="small">از عکس لیبل، نام کالا و تعداد داخل بسته جداگانه استخراج می‌شود. کد کالا برای این مرحله ضروری نیست؛ نتیجه را قبل از ثبت بررسی کن.</div>
+    <input id="labelProductName" class="picker" placeholder="نام کالا که از لیبل خوانده می‌شود" style="margin-top:8px">
     <input id="labelPhoto" type="file" accept="image/*" capture="environment" style="margin-top:8px">
     <button id="readLabelQty" class="secondary" type="button" style="width:100%;margin-top:8px">🔎 خواندن تعداد از عکس لیبل</button>
     <div id="labelQtyStatus" class="status wait hidden"></div>
@@ -572,6 +573,29 @@ function extractCustomerNameFromOCR(text){
  }
  return "";
 }
+function parsePackageNameFromOCR(text){
+ const lines=String(text||"").replace(/[يى]/g,"ی").replace(/ك/g,"ک").replace(/[ـ\u200c\u00a0]/g," ").replace(/[|¦]/g," ").split(/\r?\n/)
+   .map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
+ const candidates=[];
+ const reject=/تکنو\s*یدک|پارت\s*عباسی|تلفن|آدرس|نشانی|فاکتور|قیمت|مبلغ|بارکد|www|https?:/i;
+ for(const raw of lines){
+   if(reject.test(raw)) continue;
+   // OCR may place product name and pack count on the same line. Remove pack/count and label metadata first.
+   let line=raw
+     .replace(/(?:تعداد\s*(?:(?:داخل|در)\s*بسته)?|تعداد\s*بسته|مقدار\s*بسته|pack\s*qty|qty\s*per\s*pack)\s*[:：=#-]?\s*(?:عدد\s*)?[0-9۰-۹٠-٩]{1,4}\s*(?:عدد|قطعه|pcs?|pieces?)?/ig," ")
+     .replace(/(?:تعداد\s*(?:(?:داخل|در)\s*بسته)?|تعداد\s*بسته|مقدار\s*بسته|کد\s*کالا|کد|بارکد)\s*[:：=#-]?/ig," ")
+     .replace(/\b(?:ATYP|PCS|QTY|QUANTITY)\b/ig," ")
+     .replace(/[|¦]+/g," ").replace(/\s+/g," ").trim();
+   if(!line || /تکنو\s*یدک|پارت\s*عباسی|تلفن|آدرس|نشانی|فاکتور|قیمت|مبلغ|بارکد|www|https?:/i.test(line)) continue;
+   if((line.match(/[\u0600-\u06FF]/g)||[]).length<5) continue;
+   const digits=(line.match(/[0-9۰-۹٠-٩]/g)||[]).length;
+   if(digits>2) continue;
+   if(line.length>=8 && line.length<=100 && !/^(?:تعداد|بسته|کارتن|شماره|کد)$/i.test(line)) candidates.push(line);
+ }
+ // Prefer a clean product description; return blank rather than guessing when OCR provides no candidate.
+ candidates.sort((a,b)=>b.length-a.length);
+ return candidates[0]||"";
+}
 function parsePackageQuantityFromOCR(text){
  const s=String(text||"")
    .replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d))
@@ -762,8 +786,10 @@ $("readLabelQty").addEventListener("click", async()=>{
      if(r2.ok&&d2.ok){const text2=String(d2.text||"");const q2=parsePackageQuantityFromOCR(text2);if(text2){text+=`\n\n--- تلاش دوم (متن لاتین) ---\n${text2}`;}$("labelRawText").textContent=text; if(q2!==null){q=q2;usedLatinFallback=true;}}
    }
    $("labelRawText").textContent=text||"متنی از لیبل خوانده نشد.";$("labelRawDetails").classList.remove("hidden");
-   if(q!==null){$("scanQty").value=String(q);status.className="status ok";status.textContent=`تعداد پیشنهادی از لیبل: ${toFa(q)}${usedLatinFallback?' (از تلاش دوم)':''}. قبل از ثبت، آن را با نوشته روی بسته تطبیق بده.`;}
-   else {status.className="status wait";status.textContent=`دو تلاش OCR انجام شد، اما تعداد بسته به‌صورت واضح تشخیص داده نشد. متن خام پایین را بررسی کن؛ اگر تعداد روی لیبل درج نشده، باید دستی وارد شود.`;}
+   const productName=parsePackageNameFromOCR(text);
+   $("labelProductName").value=productName;
+   if(q!==null){$("scanQty").value=String(q);status.className="status ok";status.textContent=`نام کالا: ${productName||"تشخیص داده نشد"} | تعداد در بسته: ${toFa(q)}${usedLatinFallback?' (تعداد از تلاش دوم)':''}. نام و تعداد را با لیبل تطبیق بده.`;}
+   else {status.className="status wait";status.textContent=`نام کالا: ${productName||"تشخیص داده نشد"} | تعداد بسته واضح نبود؛ تعداد را دستی بررسی کن.`;}
  }catch(e){status.className="status err";status.textContent="خواندن لیبل ناموفق بود: "+(e?.message||String(e));}
  finally{btn.disabled=false;}
 });
