@@ -1,5 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 const parser = require('../public/ocr-parser');
 
 assert.equal(parser.extractInvoiceNumber('18033\nشماره :\n1405/07/18\nتاریخ :\nکد کالا یا خدمات'), '18033');
@@ -20,4 +22,12 @@ const invoice = [
 ].join('\n');
 const rows = parser.extractItemsFromText(invoice, products);
 assert.deepEqual(rows.map(x => [x.code, x.qty]), [['11401', 50], ['18501', 20]]);
-console.log('PASS: invoice number, package quantity, false-positive code rejection, and table quantity parsing');
+
+const html = fs.readFileSync(require.resolve('../public/index.html'), 'utf8');
+const nameFnMatch = html.match(/function parsePackageNameFromOCR\\(text\\)\\{[\\s\\S]*?\\n\\}\\nfunction parsePackageQuantityFromOCR\\(text\\)/);
+assert.ok(nameFnMatch, 'label product-name parser should exist in the UI');
+const parsePackageNameFromOCR = vm.runInNewContext(nameFnMatch[0].replace(/\\nfunction parsePackageQuantityFromOCR\\(text\\)\\s*$/, '') + '\\nparsePackageNameFromOCR', {});
+assert.equal(parsePackageNameFromOCR('تکنو یدک پارت عباسی\\nسوکت سوزن نیسان دیزل و مهره سمند\\nتعداد در بسته ۵ عدد'), 'سوکت سوزن نیسان دیزل و مهره سمند');
+assert.equal(parsePackageNameFromOCR('سوکت سوزن نیسان دیزل و مهره سمند تعداد در بسته ۵ عدد'), 'سوکت سوزن نیسان دیزل و مهره سمند');
+
+console.log('PASS: invoice number, package quantity, false-positive code rejection, table quantities, and label product name parsing');
