@@ -616,6 +616,10 @@ function updateSummary(){
 function toFa(n){return String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d])}
 
 async function compressImage(file,maxBytes=900000){
+ // PDF invoices must be uploaded unchanged. Trying to decode a PDF with Image()
+ // fails before /api/ocr can receive it, which made PDF import appear broken.
+ const isPdf = file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name || '');
+ if (isPdf) return file;
  if(file.size<=maxBytes) return file;
  return new Promise((resolve,reject)=>{
   const img=new Image(),url=window.URL.createObjectURL(file);
